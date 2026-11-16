@@ -388,6 +388,18 @@ onMounted(() => {
   const towers = towerLayer().addTo(map)
   L.control.layers(layers, { 'Torres de control': towers }, { position: 'topright' }).addTo(map)
   L.control.scale({ metric: true, imperial: false, maxWidth: 160 }).addTo(map)
+  // Nivel de zoom actual, encima de la escala (Leaflet apila hacia arriba).
+  const zoomLabel = new (L.Control.extend({
+    options: { position: 'bottomleft' },
+    onAdd(m) {
+      const el = L.DomUtil.create('div', 'leaflet-control zoom-label')
+      const update = () => (el.textContent = `Zoom ${m.getZoom()} de ${m.getMaxZoom()}`)
+      m.on('zoomend baselayerchange', update)
+      update()
+      return el
+    },
+  }))()
+  zoomLabel.addTo(map)
   new CompassControl().addTo(map)
   if (hasGyro) {
     new GyroControl().addTo(map)
@@ -451,6 +463,16 @@ defineExpose({ focus })
 </template>
 
 <style>
+.zoom-label {
+  background: rgb(255 255 255 / 0.85);
+  border: 2px solid #777;
+  border-bottom: none;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 0 !important;
+}
 .tower-icon {
   display: flex;
   align-items: center;
