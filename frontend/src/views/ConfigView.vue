@@ -178,6 +178,8 @@ async function findChats() {
   searchingChats.value = true
   notice.value = null
   chats.value = null
+  pickedChat.value = null
+  chatError.value = ''
   try {
     const body = token.value.trim() ? { telegram_bot_token: token.value.trim() } : {}
     const res = await api('/config/telegram-chats/', { method: 'POST', body })
@@ -185,16 +187,20 @@ async function findChats() {
     if (res.chats.length === 1) pickChat(res.chats[0])
   } catch (err) {
     errors.value = { ...errors.value, ...err.fieldErrors }
-    notice.value = { kind: 'error', text: err.message }
+    chatError.value = err.message
   } finally {
     searchingChats.value = false
   }
 }
 
+// El resultado se muestra junto al botón (el aviso general queda arriba, fuera de la vista).
+const pickedChat = ref(null)
+const chatError = ref('')
+
 function pickChat(chat) {
   form.telegram_chat_id = chat.id
   errors.value = { ...errors.value, telegram_chat_id: '' }
-  notice.value = { kind: 'info', text: `Grupo elegido: «${chat.title}». Tocá «Guardar» para usarlo.` }
+  pickedChat.value = chat
 }
 
 // Aviso de mantenimiento: se publica aparte del resto (no espera a «Guardar»).
@@ -361,9 +367,19 @@ onMounted(load)
                 <i v-else class="bi bi-search me-1"></i>
                 {{ searchingChats ? 'Buscando…' : 'Buscar mi grupo' }}
               </button>
-              <span class="small text-body-secondary">
+              <span v-if="!chats" class="small text-body-secondary">
                 Antes: agregá el bot al grupo y escribí <code>/start</code> en ese grupo.
               </span>
+            </div>
+            <div v-if="pickedChat" class="small text-success-emphasis mt-2" data-picked-chat>
+              <i class="bi bi-check-circle-fill me-1"></i>Grupo encontrado: <b>«{{ pickedChat.title }}»</b>.
+              <template v-if="pickedChat.id === String(saved.telegram_chat_id)">
+                Es el que ya está guardado: no hace falta hacer nada más.
+              </template>
+              <template v-else>Tocá «Guardar» para usarlo.</template>
+            </div>
+            <div v-if="chatError" class="small text-danger-emphasis mt-2">
+              <i class="bi bi-exclamation-circle me-1"></i>{{ chatError }}
             </div>
             <div v-if="chats && chats.length > 1" class="mt-2">
               <div class="small fw-semibold mb-1">El bot está en estos grupos. Elegí uno:</div>
