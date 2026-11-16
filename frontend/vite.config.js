@@ -9,6 +9,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     strictPort: true,
+    // Permite entrar por Tailscale (*.ts.net) además de localhost.
+    allowedHosts: ['.ts.net'],
     proxy: {
       '/api': { target: backend },
       '/ws': { target: backend, ws: true },
