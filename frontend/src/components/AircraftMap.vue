@@ -368,6 +368,13 @@ onMounted(() => {
     zoomControl: true,
     worldCopyJump: false,
     maxBoundsViscosity: 1.0,
+    // Libre, pero sin alejarse tanto que el mundo quede más chico que la pantalla
+    // ni pasarse de los polos (ahí no hay mapa).
+    minZoom: 4,
+    maxBounds: [
+      [-85, -540],
+      [85, 540],
+    ],
     rotate: true,
     rotateControl: false, // se usa la rosa de los vientos propia
     touchRotate: true, // giro con dos dedos
