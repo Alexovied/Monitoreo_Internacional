@@ -338,7 +338,7 @@ function positionAge(ac) {
         </p>
       </section>
 
-      <section class="d-flex flex-column border-bottom flex-grow-1 order-2 order-lg-0" style="min-height: 120px">
+      <section class="d-flex flex-column border-bottom flex-grow-1 order-2 order-lg-0 ac-section">
         <h6 class="d-flex align-items-center justify-content-between text-uppercase text-body-secondary small fw-semibold px-3 pt-3 mb-2">
           <span class="d-flex align-items-center gap-2">
             <span><i class="bi bi-list-ul me-1"></i>Aeronaves ({{ live.aircraft.length }})</span>
@@ -473,7 +473,12 @@ function positionAge(ac) {
   font-size: 1.0625rem;
   flex-shrink: 0;
   min-height: 0;
+  /* Si no entra todo, se desplaza el panel entero: la lista nunca queda aplastada. */
+  overflow-y: auto;
   border-left: var(--bs-border-width) solid var(--bs-border-color);
+}
+.ac-section {
+  min-height: 260px;
 }
 /* Pantallas chicas: el mapa arriba y el panel debajo, a todo el ancho. Se
    desplaza la página; la lista conserva su propio desplazamiento. */
@@ -496,6 +501,12 @@ function positionAge(ac) {
   }
   .ac-list {
     max-height: 50vh;
+  }
+  .sidebar {
+    overflow-y: visible;
+  }
+  .ac-section {
+    min-height: 120px;
   }
 }
 /* Lugar reservado para la barra de desplazamiento en los dos, así los
