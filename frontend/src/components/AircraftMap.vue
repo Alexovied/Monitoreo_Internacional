@@ -60,7 +60,7 @@ function headingOf(ac) {
 
 function iconKey(ac) {
   const h = headingOf(ac)
-  return [h === null ? 'x' : Math.round(h), shapeOf(ac), ac.inside, ac.alt_baro === 'ground', ac.hex === props.selectedHex].join('|')
+  return [h === null ? 'x' : Math.round(h), shapeOf(ac), ac.inside, ac.alt_baro === 'ground', ac.hex === props.selectedHex, ac.hex === flashHex].join('|')
 }
 
 function makeIcon(ac) {
@@ -69,6 +69,7 @@ function makeIcon(ac) {
   if (ac.inside) classes.push('inside')
   if (ac.alt_baro === 'ground') classes.push('ground')
   if (ac.hex === props.selectedHex) classes.push('selected')
+  if (ac.hex === flashHex) classes.push('flash')
   // Los dibujos apuntan al norte y se rotan según el rumbo. Un avión sin rumbo
   // es un punto; helicópteros, drones, etc. sin rumbo (suelen estar quietos)
   // muestran su forma sin rotar, para que se reconozcan igual.
@@ -119,6 +120,7 @@ function syncMarkers() {
       entry.label = label
     }
     entry.marker.setZIndexOffset(ac.hex === props.selectedHex ? 1000 : ac.inside ? 500 : 0)
+    entry.marker.getTooltip()?.getElement()?.classList.toggle('selected', ac.hex === props.selectedHex)
   }
   for (const [hex, entry] of markers) {
     if (!seen.has(hex)) {
@@ -403,6 +405,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (map) setGyro(map, false)
+  clearTimeout(flashTimer)
   map?.remove()
   map = null
   markers.clear()
@@ -413,9 +416,27 @@ onBeforeUnmount(() => {
 watch(() => props.config, syncArea, { deep: true })
 watch([() => props.aircraft, () => props.selectedHex], syncMarkers)
 
-function focus(hex) {
+// Centra el mapa en la aeronave. Con zoom (al venir de una alerta) también se
+// acerca y la hace titilar. Devuelve false si la aeronave no está en el mapa.
+const FOCUS_ZOOM = 10
+const FLASH_MS = 3000
+let flashHex = null // aeronave que destella (va en el ícono: sobrevive a setIcon)
+let flashTimer = null
+
+function focus(hex, { zoom = false } = {}) {
   const entry = markers.get(hex)
-  if (entry && map) map.panTo(entry.marker.getLatLng())
+  if (!entry || !map) return false
+  if (!zoom) {
+    map.panTo(entry.marker.getLatLng())
+    return true
+  }
+  map.setView(entry.marker.getLatLng(), Math.max(map.getZoom(), FOCUS_ZOOM))
+  flashHex = hex
+  entry.key = null // fuerza a redibujar el ícono con el destello
+  syncMarkers()
+  clearTimeout(flashTimer)
+  flashTimer = setTimeout(() => (flashHex = null), FLASH_MS)
+  return true
 }
 
 defineExpose({ focus })
@@ -536,8 +557,68 @@ defineExpose({ focus })
 .ac-icon.selected svg {
   color: var(--bs-warning);
   stroke: #000;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+}
+/* Aeronave elegida: un anillo que late alrededor, para encontrarla de un vistazo. */
+.ac-icon {
+  position: relative;
+}
+.ac-icon.selected::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 3px solid var(--bs-warning);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  animation: ac-pulse 1.6s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes ac-pulse {
+  from {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+/* Al llegar desde una alerta: unos destellos más fuertes. */
+.ac-icon.flash::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: rgba(255, 193, 7, 0.55);
+  animation: ac-flash 0.7s ease-out 4;
+  pointer-events: none;
+}
+@keyframes ac-flash {
+  from {
+    transform: scale(0.5);
+    opacity: 1;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ac-icon.selected::before {
+    animation: none;
+    transform: scale(1.1);
+  }
+  .ac-icon.flash::after {
+    display: none;
+  }
+}
+.leaflet-tooltip.ac-label.selected {
+  background: var(--bs-warning);
+  color: #000;
+  font-size: 13px;
+  padding: 1px 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 .leaflet-tooltip.ac-label {
   background: rgba(255, 255, 255, 0.85);

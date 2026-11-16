@@ -8,10 +8,15 @@ from accounts.permissions import IsAdmin
 from monitor.broadcast import send_config_sync
 from monitor.openair import OpenAirError, decode_openair_bytes, parse_openair
 from monitor.service import monitor
-from monitor.telegram import TelegramError, send_test_message
+from monitor.telegram import TelegramError, find_group_chats, send_maintenance, send_test_message
 
 from .models import SystemConfig
-from .serializers import OpenAirUploadSerializer, SystemConfigSerializer
+from .serializers import (
+    MaintenanceSerializer,
+    OpenAirUploadSerializer,
+    SystemConfigSerializer,
+    TelegramChatsSerializer,
+)
 
 
 class ConfigView(APIView):
@@ -72,3 +77,46 @@ class TelegramTestView(APIView):
         detail = f"Mensaje de prueba enviado al grupo «{title}»"
         detail += " con el mapa." if with_map else " (sin mapa: no se pudo armar la imagen, ver el log)."
         return Response({"detail": detail, "with_map": with_map})
+
+
+class MaintenanceView(APIView):
+    """Publica o quita el aviso de mantenimiento y, si se pide, lo manda al grupo."""
+
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        data = MaintenanceSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        config = SystemConfig.load()
+        config.maintenance_message = data.validated_data["message"]
+        config.save(update_fields=["maintenance_message", "updated_at"])
+        send_config_sync(config)
+
+        telegram = None  # None: no se pidió; True: enviado; texto: el error
+        if data.validated_data["notify_telegram"]:
+            try:
+                async_to_sync(send_maintenance)(config)
+                telegram = True
+            except TelegramError as exc:
+                telegram = str(exc)
+        body = SystemConfigSerializer(config).data
+        body["telegram_result"] = telegram
+        return Response(body)
+
+
+class TelegramChatsView(APIView):
+    """Lista los grupos donde está el bot, para elegir el chat id sin buscarlo a mano."""
+
+    permission_classes = [IsAdmin]
+
+    def post(self, request):
+        data = TelegramChatsSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        token = data.validated_data.get("telegram_bot_token") or SystemConfig.load().telegram_bot_token
+        if not token:
+            return Response({"detail": "Primero escribí el token del bot."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            chats = async_to_sync(find_group_chats)(token)
+        except TelegramError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"chats": chats})

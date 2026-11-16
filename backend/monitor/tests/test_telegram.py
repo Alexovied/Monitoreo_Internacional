@@ -5,7 +5,14 @@ import httpx
 from django.test import SimpleTestCase, override_settings
 
 from monitor.alerts import alert_clock, build_alert, flightradar_url, format_alert_message
-from monitor.telegram import MAX_ATTEMPTS, TelegramError, TelegramNotifier, send_message
+from monitor.telegram import (
+    MAX_ATTEMPTS,
+    TelegramError,
+    TelegramNotifier,
+    group_chats_from_updates,
+    maintenance_text,
+    send_message,
+)
 
 from .helpers import CNA, NOW, make_aircraft
 
@@ -176,3 +183,29 @@ class NotifierTests(SimpleTestCase):
             with self.assertLogs("monitor.telegram", "INFO"):
                 self.assertFalse(await self.notifier([config(token="", chat="")]).deliver(client, self.alert))
         self.assertEqual(calls, [])
+
+
+class GroupDetectionTests(SimpleTestCase):
+    def test_groups_from_updates(self):
+        group = {"id": -555, "type": "group", "title": "Viejo"}
+        updates = [
+            {"message": {"chat": {"id": 7, "type": "private", "first_name": "Ana"}}},
+            {"my_chat_member": {"chat": group, "new_chat_member": {"status": "member"}}},
+            # El grupo pasó a supergrupo: el id viejo deja de servir.
+            {"message": {"chat": group, "migrate_to_chat_id": -100555}},
+            {"message": {"chat": {"id": -100555, "type": "supergroup", "title": "Pilotos"}}},
+            {"message": {"chat": {"id": -100555, "type": "supergroup", "title": "Pilotos CNA"}}},
+            {"my_chat_member": {"chat": {"id": -100777, "type": "supergroup", "title": "Sacado"},
+                                "new_chat_member": {"status": "kicked"}}},
+        ]
+        self.assertEqual(group_chats_from_updates(updates), [{"id": "-100555", "title": "Pilotos CNA"}])
+        self.assertEqual(group_chats_from_updates([]), [])
+
+    def test_maintenance_text_escapes_and_announces_end(self):
+        cfg = SimpleNamespace(zone_name="CNA <10km>", maintenance_message="Corte <b>lunes</b> & martes")
+        text = maintenance_text(cfg)
+        self.assertIn("AVISO DE MANTENIMIENTO", text)
+        self.assertIn("Corte &lt;b&gt;lunes&lt;/b&gt; &amp; martes", text)
+        self.assertIn("CNA &lt;10km&gt;", text)
+        cfg.maintenance_message = ""
+        self.assertIn("FIN DEL MANTENIMIENTO", maintenance_text(cfg))

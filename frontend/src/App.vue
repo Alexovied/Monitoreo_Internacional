@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AlertToasts from './components/AlertToasts.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
@@ -20,6 +20,25 @@ watch(
   (id) => (id ? connectLive() : disconnectLive()),
   { immediate: true },
 )
+
+// Aviso de mantenimiento: se puede cerrar, y vuelve si el administrador lo cambia.
+const maintenance = computed(() => live.config?.maintenance || '')
+const hiddenMaintenance = ref(readHidden())
+function readHidden() {
+  try {
+    return sessionStorage.getItem('avion.maintenance.hidden') || ''
+  } catch {
+    return ''
+  }
+}
+function hideMaintenance() {
+  hiddenMaintenance.value = maintenance.value
+  try {
+    sessionStorage.setItem('avion.maintenance.hidden', maintenance.value)
+  } catch {
+    /* sin almacenamiento: vuelve a aparecer al recargar */
+  }
+}
 
 async function onLogout() {
   await logout()
@@ -110,6 +129,17 @@ async function onLogout() {
         </div>
       </div>
     </nav>
+
+    <div
+      v-if="session.user && maintenance && maintenance !== hiddenMaintenance"
+      class="alert alert-warning rounded-0 border-0 border-bottom border-warning d-flex align-items-start gap-2 mb-0 py-2 px-3 flex-shrink-0"
+      role="alert"
+      data-maintenance-banner
+    >
+      <i class="bi bi-cone-striped fs-5 lh-1"></i>
+      <div class="flex-grow-1 small"><strong>Mantenimiento:</strong> {{ maintenance }}</div>
+      <button type="button" class="btn-close" aria-label="Ocultar aviso" @click="hideMaintenance"></button>
+    </div>
 
     <main class="content">
       <RouterView />

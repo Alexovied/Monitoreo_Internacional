@@ -6,4 +6,6 @@ urlpatterns = [
     path("config/", views.ConfigView.as_view()),
     path("config/openair/", views.OpenAirView.as_view()),
     path("config/telegram-test/", views.TelegramTestView.as_view()),
+    path("config/telegram-chats/", views.TelegramChatsView.as_view()),
+    path("config/maintenance/", views.MaintenanceView.as_view()),
 ]

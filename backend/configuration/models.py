@@ -74,6 +74,8 @@ class SystemConfig(models.Model):
         blank=True,
         validators=[telegram_chat_id_validator],
     )
+    # Aviso de mantenimiento para todos los usuarios; vacío = sin aviso.
+    maintenance_message = models.CharField("aviso de mantenimiento", max_length=300, blank=True, default="")
     updated_at = models.DateTimeField("última modificación", auto_now=True)
 
     class Meta:

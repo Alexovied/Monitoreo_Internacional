@@ -46,9 +46,25 @@ function selectAndFocus(hex) {
   mapRef.value?.focus(hex)
 }
 
+// En el celular el panel queda debajo del mapa: al elegir de la lista se sube
+// hasta el mapa, donde se ve la aeronave y su ficha.
+const WIDE = '(min-width: 992px)'
+const wide = window.matchMedia(WIDE).matches
+
+function scrollToMap() {
+  if (!window.matchMedia(WIDE).matches) document.querySelector('.content')?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
 function pick(hex) {
   selectAndFocus(hex)
   tourTouched(hex)
+  scrollToMap()
+}
+
+// Abrir una alerta de la lista de ingresos: centrar y acercar, o avisar si ya no está.
+function openAlert(a) {
+  live.focusHex = a.hex
+  scrollToMap()
 }
 
 // Recorrido automático: selecciona las aeronaves de la lista una por una, igual
@@ -128,14 +144,34 @@ onMounted(() => {
 })
 onBeforeUnmount(() => clearInterval(tourTimer))
 
-// Si se eligió una aeronave desde un aviso, centrar el mapa en ella.
+// Aeronave pedida desde una alerta que ya no está en el mapa (salió del área o
+// dejó de transmitir): se avisa en vez de no hacer nada.
+const missing = ref(null) // { label, time }
+
+function showMissing(hex) {
+  const alert = live.alerts.find((a) => a.hex === hex)
+  missing.value = { label: alert?.label || hex.toUpperCase(), time: alert?.time ?? null }
+  if (live.selectedHex === hex) live.selectedHex = null
+}
+
+// Si se eligió una aeronave desde un aviso, centrar el mapa en ella y acercar.
 function consumeFocus() {
-  if (live.focusHex && mapRef.value) {
-    mapRef.value.focus(live.focusHex)
-    live.focusHex = null
+  const hex = live.focusHex
+  if (!hex || !mapRef.value || !live.config) return
+  live.focusHex = null
+  if (mapRef.value.focus(hex, { zoom: true })) {
+    live.selectedHex = hex
+    missing.value = null
+  } else {
+    showMissing(hex)
   }
 }
-watch(() => live.focusHex, consumeFocus, { flush: 'post' })
+// Si el usuario elige otra aeronave, el aviso ya no hace falta.
+watch(
+  () => live.selectedHex,
+  (hex) => hex && (missing.value = null),
+)
+watch([() => live.focusHex, () => live.config], consumeFocus, { flush: 'post' })
 onMounted(consumeFocus)
 
 // Enlace desde la alerta de Telegram: /<código>. Se selecciona y se centra la
@@ -146,16 +182,16 @@ const router = useRouter()
 const hexParam = route.params.hex || route.query.hex
 let linkedHex = typeof hexParam === 'string' ? hexParam.toLowerCase() : null
 if (linkedHex) {
-  live.selectedHex = linkedHex
+  // Se decide con los primeros datos del servidor (llegan junto con la configuración).
   watch(
-    () => live.aircraft,
+    () => live.config && live.aircraft,
     (list) => {
-      if (!linkedHex || !list.some((a) => a.hex === linkedHex)) return
+      if (!list || !linkedHex) return
       live.focusHex = linkedHex
       linkedHex = null
       router.replace('/')
     },
-    { immediate: true },
+    { immediate: true, flush: 'post' },
   )
 }
 
@@ -177,6 +213,42 @@ function positionAge(ac) {
         @select="select"
       />
       <div
+        v-if="missing"
+        class="missing-notice position-absolute start-50 translate-middle-x alert alert-warning shadow d-flex align-items-start gap-2 mb-0 py-2"
+        role="status"
+        data-missing
+      >
+        <i class="bi bi-eye-slash-fill fs-5 lh-1"></i>
+        <div class="small">
+          <strong>{{ missing.label }} ya no aparece en el mapa.</strong><br />
+          Salió del área de cobertura o dejó de transmitir<template v-if="missing.time">
+            (la alerta es de las {{ clock(missing.time, live.config?.time_zone) }})</template>.
+        </div>
+        <button type="button" class="btn-close ms-1" aria-label="Cerrar aviso" @click="missing = null"></button>
+      </div>
+      <!-- Celular: la ficha de la aeronave elegida va sobre el mapa, sin bajar. -->
+      <div v-if="selected" class="mobile-card d-lg-none position-absolute bg-body shadow rounded-3 p-2" data-mobile-card>
+        <div class="d-flex align-items-center gap-2">
+          <strong class="text-truncate">{{ identification(selected) }}</strong>
+          <span v-if="selected.inside" class="badge text-bg-danger">EN LA ZONA</span>
+          <button type="button" class="btn-close ms-auto" aria-label="Cerrar ficha" @click="live.selectedHex = null"></button>
+        </div>
+        <div class="d-flex flex-wrap column-gap-3 small mt-1">
+          <span><span class="text-body-secondary">Tipo</span> {{ SHAPES[shapeOf(selected)].label }}</span>
+          <span><span class="text-body-secondary">Altitud</span> <b>{{ altitude(selected.alt_baro) }}</b></span>
+          <span><span class="text-body-secondary">Velocidad</span> <b>{{ speed(selected.gs) }}</b></span>
+          <span><span class="text-body-secondary">A</span> <b>{{ distance(selected.dst) }}</b> del centro</span>
+        </div>
+        <a :href="flightradarUrl(selected)" target="_blank" rel="noopener noreferrer" class="small">
+          <i class="bi bi-box-arrow-up-right me-1"></i>Ver en Flightradar24
+        </a>
+      </div>
+      <span
+        v-if="live.demo"
+        class="position-absolute top-0 start-50 translate-middle-x mt-2 badge text-bg-warning fs-6 shadow"
+        style="z-index: 1000"
+      >MODO DEMO · aeronaves simuladas</span>
+      <div
         v-if="!live.config"
         class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-body-tertiary bg-opacity-75 fs-5"
         style="z-index: 1000"
@@ -187,7 +259,10 @@ function positionAge(ac) {
 
     <aside class="sidebar d-flex flex-column bg-body">
       <!-- Referencia: el mismo dibujo que en el mapa y qué significa. -->
-      <section v-if="zone" class="p-3 border-bottom map-legend">
+      <details v-if="zone" class="p-3 border-bottom map-legend order-4 order-lg-0" :open="wide">
+        <summary class="small fw-semibold text-uppercase text-body-secondary mb-2">
+          <i class="bi bi-map me-1"></i>Referencias del mapa
+        </summary>
         <div class="d-flex align-items-center gap-2 mb-2">
           <svg width="26" height="26" viewBox="0 0 22 22" class="flex-shrink-0" aria-hidden="true">
             <circle cx="11" cy="11" r="9" fill="rgba(220, 53, 69, 0.15)" stroke="#dc3545" stroke-width="2.5" />
@@ -214,9 +289,9 @@ function positionAge(ac) {
             <span class="shape-legend-icon" v-html="s.svg"></span>{{ s.label }}
           </span>
         </div>
-      </section>
+      </details>
 
-      <section class="p-3 border-bottom">
+      <section class="p-3 border-bottom d-none d-lg-block">
         <h6 class="text-uppercase text-body-secondary small fw-semibold mb-2">
           <i class="bi bi-info-circle me-1"></i>Aeronave seleccionada
         </h6>
@@ -259,7 +334,7 @@ function positionAge(ac) {
         </p>
       </section>
 
-      <section class="d-flex flex-column border-bottom flex-grow-1" style="min-height: 120px">
+      <section class="d-flex flex-column border-bottom flex-grow-1 order-2 order-lg-0" style="min-height: 120px">
         <h6 class="d-flex align-items-center justify-content-between text-uppercase text-body-secondary small fw-semibold px-3 pt-3 mb-2">
           <span class="d-flex align-items-center gap-2">
             <span><i class="bi bi-list-ul me-1"></i>Aeronaves ({{ live.aircraft.length }})</span>
@@ -301,7 +376,7 @@ function positionAge(ac) {
         </div>
       </section>
 
-      <section v-if="live.alerts.length" class="border-bottom">
+      <section v-if="live.alerts.length" class="border-bottom order-1 order-lg-0">
         <h6 class="text-uppercase text-body-secondary small fw-semibold px-3 pt-3 mb-2">
           <i class="bi bi-bell me-1"></i>Ingresos a la zona en esta sesión
         </h6>
@@ -311,7 +386,7 @@ function positionAge(ac) {
             :key="a.id"
             type="button"
             class="list-group-item list-group-item-action d-flex gap-3 align-items-baseline py-1"
-            @click="pick(a.hex)"
+            @click="openAlert(a)"
           >
             <span class="small text-body-secondary">{{ clock(a.time, live.config?.time_zone) }}</span>
             <strong class="flex-grow-1">{{ a.label }}</strong>
@@ -320,7 +395,7 @@ function positionAge(ac) {
         </div>
       </section>
 
-      <footer class="credits px-3 py-1 mt-auto text-center text-body-secondary">
+      <footer class="credits px-3 py-1 mt-auto text-center text-body-secondary order-5 order-lg-0">
         <i class="bi bi-c-circle me-1"></i>Datos de aeronaves:
         <a href="https://adsb.fi/" target="_blank" rel="noopener">adsb.fi</a> · Mapa:
         <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>
@@ -342,6 +417,42 @@ function positionAge(ac) {
 }
 .map-layout {
   height: 100%;
+}
+.missing-notice {
+  top: 0.75rem;
+  z-index: 1001;
+  width: min(420px, calc(100% - 1.5rem));
+}
+.mobile-card {
+  left: 0.5rem;
+  right: 0.5rem;
+  bottom: 2.75rem; /* encima de la escala y la atribución */
+  z-index: 1001;
+  border: 2px solid var(--bs-warning);
+}
+/* Celular: el aviso va abajo para no tapar el zoom, y con la ficha abierta se
+   oculta la escala (quedaba asomando debajo). */
+@media (max-width: 991.98px) {
+  .missing-notice {
+    top: auto;
+    bottom: 2.75rem;
+  }
+  .map-pane:has(.mobile-card) :deep(.leaflet-control-scale) {
+    display: none;
+  }
+}
+.map-legend summary {
+  cursor: pointer;
+}
+/* En la computadora las referencias siempre están abiertas. */
+@media (min-width: 992px) {
+  .map-legend summary {
+    pointer-events: none;
+    list-style: none;
+  }
+  .map-legend summary::-webkit-details-marker {
+    display: none;
+  }
 }
 .map-pane {
   min-width: 0;

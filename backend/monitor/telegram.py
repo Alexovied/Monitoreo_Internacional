@@ -10,6 +10,7 @@ mensajes de error ni en el log.
 """
 
 import asyncio
+import html
 import logging
 import time
 
@@ -160,6 +161,74 @@ async def send_test_message(config):
             raise TelegramError(explain(exc), status=exc.status) from None
     title = ((result or {}).get("chat") or {}).get("title") or config.telegram_chat_id
     return title, bool(photo) and "photo" in (result or {})
+
+
+def maintenance_text(config):
+    """Mensaje de Telegram para el aviso de mantenimiento (o su fin, si está vacío)."""
+    zone = html.escape(config.zone_name)
+    if config.maintenance_message:
+        return (f"<b>AVISO DE MANTENIMIENTO</b>\nZona: {zone}\n\n{html.escape(config.maintenance_message)}\n\n"
+                "<i>Mientras dure, puede que no lleguen alertas.</i>")
+    return f"<b>FIN DEL MANTENIMIENTO</b>\nZona: {zone}\n\nEl sistema volvió a funcionar con normalidad."
+
+
+async def send_maintenance(config):
+    """Envía al grupo el aviso de mantenimiento guardado. Lanza ``TelegramError``."""
+    if not config.telegram_enabled:
+        raise TelegramError("Telegram no está configurado.")
+    async with httpx.AsyncClient() as client:
+        try:
+            await send_message(client, config.telegram_bot_token, config.telegram_chat_id, maintenance_text(config))
+        except TelegramError as exc:
+            raise TelegramError(explain(exc), status=exc.status) from None
+
+
+GROUP_TYPES = ("group", "supergroup")
+
+
+def group_chats_from_updates(updates):
+    """Grupos donde está el bot, según los últimos mensajes que recibió.
+
+    Devuelve ``[{"id", "title"}]`` sin repetidos (el título más reciente). Un
+    grupo que pasó a supergrupo cambia de id: se usa el nuevo, no el viejo.
+    """
+    chats, migrated = {}, set()
+    for update in updates:
+        for key in ("message", "edited_message", "my_chat_member", "chat_member"):
+            item = update.get(key) or {}
+            chat = item.get("chat") or {}
+            if chat.get("type") not in GROUP_TYPES or chat.get("id") is None:
+                continue
+            if item.get("migrate_to_chat_id"):
+                migrated.add(chat["id"])
+                continue
+            # El bot fue sacado del grupo: ya no sirve.
+            status = (item.get("new_chat_member") or {}).get("status") if key == "my_chat_member" else None
+            if status in ("left", "kicked"):
+                chats.pop(chat["id"], None)
+                migrated.add(chat["id"])
+                continue
+            migrated.discard(chat["id"])
+            chats[chat["id"]] = chat.get("title") or str(chat["id"])
+    return [{"id": str(chat_id), "title": title} for chat_id, title in chats.items() if chat_id not in migrated]
+
+
+async def find_group_chats(token):
+    """Pregunta a Telegram en qué grupos recibió mensajes el bot (últimas 24 h)."""
+    async with httpx.AsyncClient() as client:
+        try:
+            updates = await _call(
+                client, token, "getUpdates",
+                json={"limit": 100, "allowed_updates": ["message", "edited_message", "my_chat_member"]},
+            )
+        except TelegramError as exc:
+            if exc.status == 409:
+                raise TelegramError("El bot tiene un webhook configurado y Telegram no deja leer sus mensajes.",
+                                    status=409) from None
+            if exc.status == 401:
+                raise TelegramError("El token del bot no es válido.", status=401) from None
+            raise
+    return group_chats_from_updates(updates or [])
 
 
 def explain(exc):

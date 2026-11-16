@@ -34,6 +34,7 @@ def public_config(config):
         "telegram_enabled": config.telegram_enabled,
         # Zona horaria del sistema (TZ del .env), para mostrar la hora local de la zona.
         "time_zone": settings.TIME_ZONE,
+        "maintenance": config.maintenance_message,
         "updated_at": config.updated_at.isoformat() if config.updated_at else None,
     }
 

@@ -19,6 +19,7 @@ export const live = reactive({
   selectedHex: null,
   focusHex: null, // pedido de centrar el mapa en una aeronave (desde un aviso)
   sound: readSoundSetting(),
+  demo: readDemoSetting(),
 })
 
 let socket = null
@@ -33,6 +34,53 @@ function readSoundSetting() {
   } catch {
     return true
   }
+}
+
+// Modo demo (?demo=1 en la URL, ?demo=0 lo apaga): suma al mapa una aeronave
+// simulada de cada tipo. Solo en este navegador; no genera alertas ni Telegram.
+function readDemoSetting() {
+  const q = new URLSearchParams(location.search).get('demo')
+  try {
+    if (q !== null) sessionStorage.setItem('avion.demo', q === '0' ? 'off' : 'on')
+    return sessionStorage.getItem('avion.demo') === 'on'
+  } catch {
+    return q !== null && q !== '0'
+  }
+}
+
+// [categoría, tipo, distancia NM, rumbo desde el centro, altitud ft, velocidad kt, track]
+const DEMO_AIRCRAFT = [
+  ['B6', 'DRON', 0.5, 45, 300, 25, 120],
+  ['A7', 'EC35', 12, 300, 1500, 110, 80],
+  ['A1', 'C152', 18, 200, 3500, 95, 20],
+  ['B1', 'ASK2', 25, 120, 4500, 50, 250],
+  ['B2', 'BALL', 30, 30, 2000, 8, null],
+  ['A3', 'A320', 40, 250, 18000, 380, 60],
+]
+
+function withDemo(aircraft) {
+  const zone = live.config?.zone
+  if (!live.demo || !zone) return aircraft
+  const now = live.status?.last_update ?? Date.now() / 1000
+  const rad = Math.PI / 180
+  const demo = DEMO_AIRCRAFT.map(([category, type, dst, bearing, alt, gs, track], i) => ({
+    hex: `demo${i}`,
+    flight: `DEMO${i + 1}`,
+    registration: 'SIMULADO',
+    type,
+    category,
+    lat: zone.lat + (dst / 60) * Math.cos(bearing * rad),
+    lon: zone.lon + ((dst / 60) * Math.sin(bearing * rad)) / Math.cos(zone.lat * rad),
+    alt_baro: alt,
+    gs,
+    track,
+    true_heading: null,
+    dst,
+    seen_pos: 0,
+    timestamp: now,
+    inside: dst <= zone.radius_nm,
+  }))
+  return [...aircraft, ...demo]
 }
 
 export function setSound(enabled) {
@@ -112,13 +160,13 @@ async function checkSession() {
 function handle(message) {
   switch (message.type) {
     case 'snapshot':
-      live.aircraft = message.aircraft
       live.config = message.config
       live.status = message.status
+      live.aircraft = withDemo(message.aircraft)
       break
     case 'aircraft':
-      live.aircraft = message.aircraft
       live.status = message.status
+      live.aircraft = withDemo(message.aircraft)
       break
     case 'config':
       live.config = message.config

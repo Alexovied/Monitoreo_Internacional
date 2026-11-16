@@ -42,7 +42,8 @@ class ConfigApiTests(TestCase):
         client = APIClient()
         client.force_authenticate(self.user)
         for method, url in (("get", "/api/config/"), ("patch", "/api/config/"), ("put", "/api/config/"),
-                            ("post", "/api/config/openair/"), ("post", "/api/config/telegram-test/")):
+                            ("post", "/api/config/openair/"), ("post", "/api/config/telegram-test/"),
+                            ("post", "/api/config/maintenance/"), ("post", "/api/config/telegram-chats/")):
             with self.subTest(method=method, url=url):
                 self.assertEqual(getattr(client, method)(url, {}).status_code, 403)
 
@@ -127,5 +128,50 @@ class ConfigApiTests(TestCase):
         error = TelegramError("Telegram rechazó el mensaje: Unauthorized — el token del bot no es válido.")
         with mock.patch("configuration.views.send_test_message", mock.AsyncMock(side_effect=error)):
             response = self.client.post("/api/config/telegram-test/")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("token", response.json()["detail"])
+
+    def test_maintenance_publish_and_clear(self):
+        sent = mock.AsyncMock()
+        with mock.patch("configuration.views.send_maintenance", sent):
+            response = self.client.post("/api/config/maintenance/", {"message": "  Corte el lunes 10 h  "}, format="json")
+            self.assertEqual(response.status_code, 200, response.json())
+            self.assertEqual(response.json()["maintenance_message"], "Corte el lunes 10 h")
+            self.assertIsNone(response.json()["telegram_result"])
+            sent.assert_not_called()
+            self.send_config.assert_called_once()
+
+            response = self.client.post("/api/config/maintenance/", {"message": "", "notify_telegram": True}, format="json")
+        self.assertEqual(response.json()["maintenance_message"], "")
+        self.assertIs(response.json()["telegram_result"], True)
+        sent.assert_awaited_once()
+        # PATCH general no puede tocar el aviso.
+        self.client.patch("/api/config/", {"maintenance_message": "x"}, format="json")
+        self.assertEqual(SystemConfig.load().maintenance_message, "")
+
+    def test_maintenance_telegram_error_still_saves(self):
+        error = TelegramError("Telegram rechazó el mensaje: Forbidden")
+        with mock.patch("configuration.views.send_maintenance", mock.AsyncMock(side_effect=error)):
+            response = self.client.post("/api/config/maintenance/", {"message": "Hoy", "notify_telegram": True},
+                                        format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Forbidden", response.json()["telegram_result"])
+        self.assertEqual(SystemConfig.load().maintenance_message, "Hoy")
+        long = self.client.post("/api/config/maintenance/", {"message": "x" * 301}, format="json")
+        self.assertEqual(long.status_code, 400)
+
+    def test_telegram_chats_uses_new_or_saved_token(self):
+        find = mock.AsyncMock(return_value=[{"id": "-100555", "title": "Pilotos"}])
+        with mock.patch("configuration.views.find_group_chats", find):
+            response = self.client.post("/api/config/telegram-chats/", {}, format="json")
+            self.assertEqual(response.json(), {"chats": [{"id": "-100555", "title": "Pilotos"}]})
+            find.assert_awaited_with(TOKEN)
+            self.client.post("/api/config/telegram-chats/", {"telegram_bot_token": " 42:otro "}, format="json")
+            find.assert_awaited_with("42:otro")
+            bad = self.client.post("/api/config/telegram-chats/", {"telegram_bot_token": "malo"}, format="json")
+        self.assertEqual(bad.status_code, 400)
+        error = TelegramError("El token del bot no es válido.")
+        with mock.patch("configuration.views.find_group_chats", mock.AsyncMock(side_effect=error)):
+            response = self.client.post("/api/config/telegram-chats/", {}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("token", response.json()["detail"])
