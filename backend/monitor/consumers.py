@@ -1,6 +1,7 @@
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from accounts.guest import is_guest_session
 from configuration.models import SystemConfig
 
 from . import broadcast
@@ -17,10 +18,14 @@ class AircraftConsumer(AsyncJsonWebsocketConsumer):
 
     async def connect(self):
         user = self.scope.get("user")
-        if user is None or not user.is_authenticated or not user.is_active:
+        if user is not None and user.is_authenticated and user.is_active:
+            self.user_group = broadcast.user_group(user.pk)
+        elif await self.is_guest():
+            # Visitante: solo mira. Se lo desconecta si se apaga el acceso.
+            self.user_group = broadcast.GUEST_GROUP
+        else:
             await self.close(code=CLOSE_UNAUTHENTICATED)
             return
-        self.user_group = broadcast.user_group(user.pk)
         await self.channel_layer.group_add(broadcast.GROUP, self.channel_name)
         await self.channel_layer.group_add(self.user_group, self.channel_name)
         await self.accept()
@@ -34,6 +39,12 @@ class AircraftConsumer(AsyncJsonWebsocketConsumer):
                 "status": monitor.status,
             }
         )
+
+    async def is_guest(self):
+        session = self.scope.get("session")
+        if session is None:
+            return False
+        return await database_sync_to_async(is_guest_session)(session)
 
     async def disconnect(self, code):
         await self.channel_layer.group_discard(broadcast.GROUP, self.channel_name)

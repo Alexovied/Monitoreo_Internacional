@@ -84,6 +84,39 @@ class ConsumerTests(TransactionTestCase):
         output = await comm.receive_output()
         self.assertEqual(output, {"type": "websocket.close", "code": CLOSE_UNAUTHENTICATED})
 
+    def guest_cookie(self, enabled=True):
+        from configuration.models import SystemConfig
+
+        config = SystemConfig.load()
+        config.guest_access = enabled
+        config.save()
+        client = Client(enforce_csrf_checks=False)
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            self.assertEqual(client.post("/api/auth/guest/").status_code, 200 if enabled else 403)
+        return client.cookies[settings.SESSION_COOKIE_NAME].value if enabled else None
+
+    async def test_guest_can_watch_and_is_cut_off(self):
+        from asgiref.sync import sync_to_async
+
+        cookie = await sync_to_async(self.guest_cookie)()
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            comm = self.communicator(cookie)
+            connected, _ = await comm.connect()
+            self.assertTrue(connected)
+            self.assertEqual((await comm.receive_json_from())["type"], "snapshot")
+            await sync_to_async(broadcast.disconnect_guests_sync)()
+            output = await comm.receive_output()
+            self.assertEqual(output, {"type": "websocket.close", "code": CLOSE_UNAUTHENTICATED})
+
+    async def test_guest_rejected_when_env_forbids_it(self):
+        from asgiref.sync import sync_to_async
+
+        cookie = await sync_to_async(self.guest_cookie)()
+        with self.settings(GUEST_ACCESS_ALLOWED=False):
+            connected, code = await self.communicator(cookie).connect()
+            self.assertFalse(connected)
+            self.assertEqual(code, CLOSE_UNAUTHENTICATED)
+
     async def async_session_cookie(self):
         from asgiref.sync import sync_to_async
 

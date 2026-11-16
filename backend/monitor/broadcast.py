@@ -12,6 +12,8 @@ from channels.layers import get_channel_layer
 from django.conf import settings
 
 GROUP = "aircraft"
+# Conexiones de visitantes (sin cuenta), para cerrarlas si se apaga el acceso.
+GUEST_GROUP = "guests"
 
 
 def user_group(user_id):
@@ -63,3 +65,8 @@ def send_config_sync(config):
 def disconnect_user_sync(user_id):
     """Cierra los WebSocket abiertos de un usuario (p. ej. al desactivarlo)."""
     async_to_sync(get_channel_layer().group_send)(user_group(user_id), {"type": "session.close"})
+
+
+def disconnect_guests_sync():
+    """Cierra los WebSocket de los visitantes (p. ej. al apagar el acceso de visitantes)."""
+    async_to_sync(get_channel_layer().group_send)(GUEST_GROUP, {"type": "session.close"})

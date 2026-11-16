@@ -9,6 +9,8 @@ router.register("users", views.UserViewSet, basename="user")
 urlpatterns = [
     path("auth/csrf/", views.CsrfView.as_view()),
     path("auth/login/", views.LoginView.as_view()),
+    path("auth/guest/", views.GuestLoginView.as_view()),
+    path("auth/options/", views.AuthOptionsView.as_view()),
     path("auth/logout/", views.LogoutView.as_view()),
     path("auth/me/", views.MeView.as_view()),
 ] + router.urls

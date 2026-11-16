@@ -5,13 +5,15 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework import mixins, status, viewsets
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 from rest_framework.views import APIView
 
 from monitor.broadcast import disconnect_user_sync
 
+from .guest import GUEST_SESSION_KEY, guest_access_enabled, guest_payload, is_guest_session
 from .permissions import IsAdmin
 from .serializers import LoginSerializer, MeSerializer, UserSerializer
 
@@ -49,7 +51,39 @@ class LoginView(APIView):
             # authenticate() ya rechaza a los usuarios inactivos.
             return Response({"detail": "Usuario o contraseña incorrectos."}, status=status.HTTP_400_BAD_REQUEST)
         login(request, user)
+        request.session.pop(GUEST_SESSION_KEY, None)
         return Response(MeSerializer(user).data)
+
+
+class GuestThrottle(AnonRateThrottle):
+    """Limita por IP las entradas como visitante (cada una crea una sesión)."""
+
+    scope = "guest"
+
+
+class AuthOptionsView(APIView):
+    """Opciones de la pantalla de login: si se muestra «Entrar como visitante»."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        return Response({"guest_access": guest_access_enabled()})
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class GuestLoginView(APIView):
+    """Entra como visitante, sin cuenta. Rechazado si el acceso no está habilitado."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [GuestThrottle]
+
+    def post(self, request):
+        if not guest_access_enabled():
+            raise PermissionDenied("El acceso de visitantes no está habilitado.")
+        # Sesión nueva (cierra la de un usuario, si había una).
+        logout(request)
+        request.session[GUEST_SESSION_KEY] = True
+        return Response(guest_payload())
 
 
 class LogoutView(APIView):
@@ -61,10 +95,14 @@ class LogoutView(APIView):
 
 
 class MeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
-        return Response(MeSerializer(request.user).data)
+        if request.user.is_authenticated:
+            return Response(MeSerializer(request.user).data)
+        if is_guest_session(request.session):
+            return Response(guest_payload())
+        raise NotAuthenticated()
 
 
 def end_sessions(user):

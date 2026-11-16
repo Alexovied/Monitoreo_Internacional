@@ -1,5 +1,6 @@
 import copy
 
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
@@ -22,6 +23,9 @@ class SystemConfigSerializer(serializers.ModelSerializer):
     )
     telegram_bot_token_masked = serializers.SerializerMethodField()
     telegram_enabled = serializers.BooleanField(read_only=True)
+    # Lo que permite el .env (GUEST_ACCESS_ENABLED) y si hoy se puede entrar.
+    guest_access_allowed = serializers.SerializerMethodField()
+    guest_access_enabled = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = SystemConfig
@@ -29,6 +33,7 @@ class SystemConfigSerializer(serializers.ModelSerializer):
             "zone_name", "zone_lat", "zone_lon", "zone_radius_nm", "zone_floor_m", "zone_ceiling_m",
             "poll_interval_s", "query_radius_nm",
             "telegram_bot_token", "telegram_bot_token_masked", "telegram_chat_id", "telegram_enabled",
+            "guest_access", "guest_access_allowed", "guest_access_enabled",
             "maintenance_message", "updated_at",
         ]
         # El aviso se cambia solo con /config/maintenance/ (puede avisar por Telegram).
@@ -36,6 +41,18 @@ class SystemConfigSerializer(serializers.ModelSerializer):
 
     def get_telegram_bot_token_masked(self, config):
         return mask_token(config.telegram_bot_token)
+
+    def get_guest_access_allowed(self, config):
+        return settings.GUEST_ACCESS_ALLOWED
+
+    def validate_guest_access(self, value):
+        # Apagarlo siempre se puede; encenderlo solo si el .env lo permite.
+        if value and not settings.GUEST_ACCESS_ALLOWED and not (self.instance and self.instance.guest_access):
+            raise serializers.ValidationError(
+                "El acceso de visitantes está desactivado en el servidor: "
+                "primero hay que poner GUEST_ACCESS_ENABLED=true en el .env."
+            )
+        return value
 
     def validate(self, attrs):
         for key in ("telegram_bot_token", "telegram_chat_id", "zone_name"):

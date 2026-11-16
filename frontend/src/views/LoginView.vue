@@ -1,7 +1,7 @@
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { login } from '../session'
+import { enterAsGuest, login, loginOptions } from '../session'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,13 +11,38 @@ const password = ref('')
 const error = ref('')
 const busy = ref(false)
 
+// El botón aparece solo si el backend lo permite; igual el backend rechaza
+// la entrada como visitante cuando no está habilitada.
+const guestAccess = ref(false)
+onMounted(async () => {
+  guestAccess.value = (await loginOptions()).guest_access === true
+})
+
+function goNext() {
+  const next = typeof route.query.next === 'string' && route.query.next.startsWith('/') ? route.query.next : '/'
+  router.replace(next)
+}
+
+async function guest() {
+  error.value = ''
+  busy.value = true
+  try {
+    await enterAsGuest()
+    goNext()
+  } catch (err) {
+    if (err.status === 403) guestAccess.value = false
+    error.value = err.status === 429 ? 'Demasiados intentos. Esperá un minuto y probá de nuevo.' : err.message
+  } finally {
+    busy.value = false
+  }
+}
+
 async function submit() {
   error.value = ''
   busy.value = true
   try {
     await login(username.value.trim(), password.value)
-    const next = typeof route.query.next === 'string' && route.query.next.startsWith('/') ? route.query.next : '/'
-    router.replace(next)
+    goNext()
   } catch (err) {
     error.value = err.status === 429 ? 'Demasiados intentos. Esperá un minuto y probá de nuevo.' : err.message
     password.value = ''
@@ -34,7 +59,9 @@ async function submit() {
         <div class="text-center mb-4">
           <i class="bi bi-airplane-fill text-primary display-5"></i>
           <h1 class="h4 mt-2 mb-1">Monitor de aeronaves</h1>
-          <p class="text-body-secondary small mb-0">Acceso solo para usuarios registrados.</p>
+          <p class="text-body-secondary small mb-0">
+            {{ guestAccess ? 'Ingresá con tu cuenta o entrá como visitante.' : 'Acceso solo para usuarios registrados.' }}
+          </p>
         </div>
 
         <div v-if="error" class="alert alert-danger d-flex align-items-center gap-2 py-2" role="alert">
@@ -69,6 +96,16 @@ async function submit() {
           <i v-else class="bi bi-box-arrow-in-right me-2"></i>
           {{ busy ? 'Ingresando…' : 'Ingresar' }}
         </button>
+
+        <template v-if="guestAccess">
+          <div class="d-flex align-items-center gap-2 my-3 text-body-secondary small">
+            <hr class="flex-grow-1 m-0" />o<hr class="flex-grow-1 m-0" />
+          </div>
+          <button class="btn btn-outline-secondary w-100 py-2" type="button" data-guest :disabled="busy" @click="guest">
+            <i class="bi bi-eye me-2"></i> Entrar como visitante
+          </button>
+          <p class="text-body-secondary small text-center mt-2 mb-0">Sin cuenta: solo para mirar el mapa.</p>
+        </template>
       </div>
     </form>
   </div>

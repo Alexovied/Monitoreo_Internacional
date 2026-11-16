@@ -9,16 +9,20 @@ from .roles import ROLE_ADMIN, ROLE_CHOICES, ROLE_USER, role_of, set_role
 class MeSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     is_admin = serializers.SerializerMethodField()
+    is_guest = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "role", "is_admin"]
+        fields = ["id", "username", "first_name", "last_name", "role", "is_admin", "is_guest"]
 
     def get_role(self, user):
         return role_of(user)
 
     def get_is_admin(self, user):
         return role_of(user) == ROLE_ADMIN
+
+    def get_is_guest(self, user):
+        return False
 
 
 class LoginSerializer(serializers.Serializer):

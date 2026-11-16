@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.permissions import IsAdmin
-from monitor.broadcast import send_config_sync
+from monitor.broadcast import disconnect_guests_sync, send_config_sync
 from monitor.openair import OpenAirError, decode_openair_bytes, parse_openair
 from monitor.service import monitor
 from monitor.telegram import TelegramError, find_group_chats, send_maintenance, send_test_message
@@ -40,6 +40,9 @@ class ConfigView(APIView):
         # Los navegadores se actualizan sin recargar y el monitor consulta ya
         # con la zona nueva, sin esperar al próximo ciclo.
         send_config_sync(config)
+        if not config.guest_access_enabled:
+            # Los visitantes que estaban mirando salen en el momento.
+            disconnect_guests_sync()
         monitor.request_refresh()
         return Response(SystemConfigSerializer(config).data)
 

@@ -18,15 +18,16 @@ Sistema privado que muestra en un mapa, en tiempo real, las aeronaves con transp
 3. [Uso](#uso)
 4. [Telegram](#telegram)
 5. [Zona de alerta y archivos OpenAir](#zona-de-alerta-y-archivos-openair)
-6. [Configuración inicial (.env)](#configuración-inicial-env)
-7. [Comandos útiles](#comandos-útiles)
-8. [Cómo funciona](#cómo-funciona)
-9. [Fuente de datos: adsb.fi](#fuente-de-datos-adsbfi)
-10. [Estructura del proyecto](#estructura-del-proyecto)
-11. [API y WebSocket](#api-y-websocket)
-12. [Solución de problemas](#solución-de-problemas)
-13. [Seguridad](#seguridad)
-14. [Atribuciones y condiciones de uso](#atribuciones-y-condiciones-de-uso)
+6. [Acceso de visitantes](#acceso-de-visitantes)
+7. [Configuración inicial (.env)](#configuración-inicial-env)
+8. [Comandos útiles](#comandos-útiles)
+9. [Cómo funciona](#cómo-funciona)
+10. [Fuente de datos: adsb.fi](#fuente-de-datos-adsbfi)
+11. [Estructura del proyecto](#estructura-del-proyecto)
+12. [API y WebSocket](#api-y-websocket)
+13. [Solución de problemas](#solución-de-problemas)
+14. [Seguridad](#seguridad)
+15. [Atribuciones y condiciones de uso](#atribuciones-y-condiciones-de-uso)
 
 ---
 
@@ -255,6 +256,17 @@ DC 5.4
 *
 ```
 
+## Acceso de visitantes
+
+Permite que la pantalla de ingreso muestre el botón **Entrar como visitante**: se entra sin cuenta y solo se puede **mirar el mapa** (aeronaves, zona y alertas en pantalla). Un visitante no ve ni puede cambiar la configuración ni los usuarios.
+
+Se habilita en dos lugares, y hacen falta **los dos**:
+
+1. En el `.env`: `GUEST_ACCESS_ENABLED=true` (y recrear el contenedor del backend). Es el interruptor general: con `false` nadie puede entrar como visitante.
+2. En **Configuración → Acceso de visitantes**: el administrador lo activa o desactiva cuando quiere.
+
+La protección es del backend, no solo del botón: si el acceso no está habilitado, `POST /api/auth/guest/` responde 403. Se comprueba en cada pedido y al abrir el WebSocket, así que al desactivarlo los visitantes que estaban mirando se desconectan en el momento y vuelven a la pantalla de ingreso.
+
 ## Configuración inicial (.env)
 
 Docker Compose pasa el archivo `.env` al backend; **nunca se copia dentro de la imagen**. Contiene secretos (la clave de Django y el token del bot): no compartirlo ni subirlo a un repositorio (ya está en `.gitignore`).
@@ -267,6 +279,7 @@ Docker Compose pasa el archivo `.env` al backend; **nunca se copia dentro de la 
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Direcciones desde donde se usa la web. | `http://localhost:5173,http://127.0.0.1:5173` |
 | `TZ` | Zona horaria de los mensajes de alerta. | `America/Argentina/Buenos_Aires` |
 | `SITE_URL` | Dirección pública de la web; el aviso de Telegram enlaza a la aeronave en el mapa. Vacía: la última `https://` de `DJANGO_CSRF_TRUSTED_ORIGINS`. | vacía |
+| `GUEST_ACCESS_ENABLED` | `true` permite el acceso de visitantes (ver [Acceso de visitantes](#acceso-de-visitantes)). Con `false` nadie puede entrar sin cuenta, aunque esté activado en Configuración. | `false` |
 | `LOG_LEVEL` | Nivel del log (`DEBUG`, `INFO`, `WARNING`…). | `INFO` |
 | `MONITOR_ENABLED` | `false` levanta la web sin consultar adsb.fi (para depurar). | `true` |
 | `ADSBFI_USER_AGENT` | Identificación que se envía a adsb.fi. | `avion-monitor/0.1 (monitor privado de aeronaves)` |
@@ -401,14 +414,16 @@ La interfaz usa **[Bootstrap 5](https://getbootstrap.com/)** (solo el CSS) y **[
 
 ## API y WebSocket
 
-Todas las rutas exigen sesión, salvo `csrf` y `login`. Sin sesión responden **401**; si el usuario no es administrador, **403**. Los pedidos que modifican algo llevan el encabezado `X-CSRFToken`.
+Todas las rutas exigen sesión, salvo `csrf`, `login`, `guest` y `options`. Un visitante solo tiene acceso a `me` y al WebSocket: el resto le responde 401. Sin sesión responden **401**; si el usuario no es administrador, **403**. Los pedidos que modifican algo llevan el encabezado `X-CSRFToken`.
 
 | Método y ruta | Descripción | Rol |
 |---|---|---|
 | `GET /api/auth/csrf/` | Entrega la cookie CSRF. | — |
 | `POST /api/auth/login/` | `{username, password}`. Máximo 10 intentos por minuto por usuario. | — |
+| `GET /api/auth/options/` | `{guest_access}`: si hoy se puede entrar como visitante. | — |
+| `POST /api/auth/guest/` | Entra como visitante (sin cuenta). **403** si el acceso de visitantes no está habilitado. Máximo 20 por minuto por IP. | — |
 | `POST /api/auth/logout/` | Cierra la sesión. | Con sesión |
-| `GET /api/auth/me/` | Usuario actual y su rol. | Con sesión |
+| `GET /api/auth/me/` | Usuario actual y su rol (`guest` para un visitante, con `is_guest: true`). | Con sesión o visitante |
 | `GET, POST /api/users/` | Listar y crear usuarios. | Admin |
 | `GET, PATCH /api/users/{id}/` | Ver y editar (rol, contraseña, `is_active`). | Admin |
 | `GET, PUT, PATCH /api/config/` | Configuración (el token se devuelve enmascarado). | Admin |

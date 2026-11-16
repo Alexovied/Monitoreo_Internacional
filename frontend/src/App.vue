@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AlertToasts from './components/AlertToasts.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import { connectLive, disconnectLive, live, setSound } from './live'
-import { displayName, logout, session } from './session'
+import { displayName, logout, roleLabel, session } from './session'
 import { clock } from './format'
 
 const router = useRouter()
@@ -14,9 +14,9 @@ const route = useRoute()
 const menuOpen = ref(false)
 watch(() => route.fullPath, () => (menuOpen.value = false))
 
-// La conexión en tiempo real existe solo con sesión iniciada.
+// La conexión en tiempo real existe solo con sesión iniciada (usuario o visitante).
 watch(
-  () => session.user?.id,
+  () => (session.user ? (session.user.is_guest ? 'guest' : session.user.id) : null),
   (id) => (id ? connectLive() : disconnectLive()),
   { immediate: true },
 )
@@ -117,14 +117,15 @@ async function onLogout() {
             <i class="bi" :class="live.sound ? 'bi-bell-fill' : 'bi-bell-slash-fill'"></i>
           </button>
           <span class="text-light d-flex align-items-center gap-2 menu-user">
-            <i class="bi bi-person-circle fs-5"></i>
+            <i class="bi fs-5" :class="session.user.is_guest ? 'bi-eye' : 'bi-person-circle'"></i>
             <span class="lh-sm">
               {{ displayName(session.user) }}<br />
-              <span class="small text-white-50">{{ session.user.is_admin ? 'Administrador' : 'Usuario' }}</span>
+              <span class="small text-white-50">{{ roleLabel(session.user) }}</span>
             </span>
           </span>
           <button class="btn btn-sm btn-outline-light" @click="onLogout">
-            <i class="bi bi-box-arrow-right me-1"></i> Salir
+            <i class="bi me-1" :class="session.user.is_guest ? 'bi-box-arrow-in-right' : 'bi-box-arrow-right'"></i>
+            {{ session.user.is_guest ? 'Ingresar con cuenta' : 'Salir' }}
           </button>
         </div>
       </div>

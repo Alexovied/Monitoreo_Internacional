@@ -142,3 +142,91 @@ class UserAdminTests(TestCase):
         client = APIClient()
         client.force_authenticate(root)
         self.assertEqual(client.get("/api/users/").status_code, 200)
+
+
+class GuestAccessTests(TestCase):
+    """Entrar como visitante: solo con el .env y la configuración habilitados, y sin tocar nada."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient(enforce_csrf_checks=True)
+
+    def enable(self, value=True):
+        from configuration.models import SystemConfig
+
+        config = SystemConfig.load()
+        config.guest_access = value
+        config.save()
+
+    def csrf(self):
+        self.client.get("/api/auth/csrf/")
+        return self.client.cookies["csrftoken"].value
+
+    def enter(self):
+        return self.client.post("/api/auth/guest/", HTTP_X_CSRFTOKEN=self.csrf())
+
+    def test_disabled_by_default(self):
+        self.assertEqual(self.client.get("/api/auth/options/").json(), {"guest_access": False})
+        self.assertEqual(self.enter().status_code, 403)
+        self.assertEqual(self.client.get("/api/auth/me/").status_code, 401)
+
+    def test_env_switch_is_required(self):
+        self.enable()
+        with self.settings(GUEST_ACCESS_ALLOWED=False):
+            self.assertFalse(self.client.get("/api/auth/options/").json()["guest_access"])
+            self.assertEqual(self.enter().status_code, 403)
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            self.assertTrue(self.client.get("/api/auth/options/").json()["guest_access"])
+
+    def test_config_switch_is_required(self):
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            self.assertEqual(self.enter().status_code, 403)
+
+    def test_guest_requires_csrf(self):
+        self.enable()
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            self.assertEqual(self.client.post("/api/auth/guest/").status_code, 403)
+
+    def test_guest_can_only_look(self):
+        self.enable()
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            response = self.enter()
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["is_guest"])
+            self.assertFalse(response.json()["is_admin"])
+
+            me = self.client.get("/api/auth/me/").json()
+            self.assertEqual(me["role"], "guest")
+
+            token = self.client.cookies["csrftoken"].value
+            for method, url in (("get", "/api/config/"), ("patch", "/api/config/"), ("get", "/api/users/"),
+                                ("post", "/api/users/"), ("post", "/api/config/maintenance/"),
+                                ("post", "/api/config/telegram-test/")):
+                with self.subTest(method=method, url=url):
+                    status_code = getattr(self.client, method)(url, {}, format="json", HTTP_X_CSRFTOKEN=token).status_code
+                    self.assertEqual(status_code, 401)
+
+    def test_turning_it_off_ends_guest_sessions(self):
+        self.enable()
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            self.enter()
+            self.assertEqual(self.client.get("/api/auth/me/").status_code, 200)
+            self.enable(False)
+            self.assertEqual(self.client.get("/api/auth/me/").status_code, 401)
+            # Volver a habilitarlo no revive una sesión vieja si se apagó el .env.
+            self.enable(True)
+        with self.settings(GUEST_ACCESS_ALLOWED=False):
+            self.assertEqual(self.client.get("/api/auth/me/").status_code, 401)
+
+    def test_login_after_guest_is_a_normal_user(self):
+        make_user("piloto")
+        self.enable()
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            self.enter()
+            token = self.client.cookies["csrftoken"].value
+            response = self.client.post("/api/auth/login/", {"username": "piloto", "password": PASSWORD},
+                                        format="json", HTTP_X_CSRFTOKEN=token)
+            self.assertEqual(response.status_code, 200)
+            me = self.client.get("/api/auth/me/").json()
+            self.assertEqual(me["username"], "piloto")
+            self.assertFalse(me["is_guest"])

@@ -114,6 +114,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "login": "10/min",
+        "guest": "20/min",
     },
 }
 
@@ -133,6 +134,11 @@ INITIAL_CONFIG = {
     "telegram_bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
     "telegram_chat_id": os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
 }
+
+# Acceso de visitantes (entrar sin cuenta, solo para mirar el mapa). Es el
+# interruptor general: si está en false nadie puede entrar como visitante,
+# aunque el administrador lo active en Configuración.
+GUEST_ACCESS_ALLOWED = env_bool("GUEST_ACCESS_ENABLED", False)
 
 # Permite levantar la web sin consultar adsb.fi (p. ej. para depurar).
 MONITOR_ENABLED = env_bool("MONITOR_ENABLED", True)

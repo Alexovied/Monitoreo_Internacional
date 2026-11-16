@@ -10,7 +10,7 @@ const MAX_RADIUS_NM = 250
 const MIN_POLL_S = 2 // igual que MIN_POLL_INTERVAL_S del backend
 const FIELDS = [
   'zone_name', 'zone_lat', 'zone_lon', 'zone_radius_nm', 'zone_floor_m', 'zone_ceiling_m',
-  'poll_interval_s', 'query_radius_nm', 'telegram_chat_id',
+  'poll_interval_s', 'query_radius_nm', 'telegram_chat_id', 'guest_access',
 ]
 const NOTICE_STYLE = {
   ok: { cls: 'alert-success', icon: 'bi-check-circle-fill' },
@@ -112,6 +112,7 @@ function payload() {
     poll_interval_s: num(form.poll_interval_s),
     query_radius_nm: num(form.query_radius_nm),
     telegram_chat_id: String(form.telegram_chat_id).trim(),
+    guest_access: !!form.guest_access,
   }
   if (token.value.trim()) body.telegram_bot_token = token.value.trim()
   return body
@@ -421,6 +422,46 @@ onMounted(load)
             <span v-if="telegramDirty" class="small text-body-secondary">
               <i class="bi bi-info-circle me-1"></i>Guardá los cambios para poder mandar la prueba.
             </span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Visitantes -->
+      <section class="card shadow-sm mb-3" data-section="guest">
+        <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
+          <div>
+            <h2 class="h5 mb-0"><i class="bi bi-eye me-2"></i>Acceso de visitantes</h2>
+            <div class="small text-body-secondary">
+              Muestra el botón «Entrar como visitante» en la pantalla de ingreso. Un visitante entra sin cuenta y solo
+              puede mirar el mapa: no ve ni cambia la configuración ni los usuarios.
+            </div>
+          </div>
+          <span class="badge" :class="saved.guest_access_enabled ? 'text-bg-success' : 'text-bg-secondary'">
+            <i class="bi me-1" :class="saved.guest_access_enabled ? 'bi-check-circle' : 'bi-dash-circle'"></i>
+            {{ saved.guest_access_enabled ? 'Activado' : 'Desactivado' }}
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="form-check form-switch">
+            <input
+              id="guest_access"
+              v-model="form.guest_access"
+              class="form-check-input"
+              type="checkbox"
+              role="switch"
+              :disabled="!saved.guest_access_allowed && !form.guest_access"
+            />
+            <label class="form-check-label" for="guest_access">Permitir entrar como visitante</label>
+          </div>
+          <div v-if="!saved.guest_access_allowed" class="small text-warning-emphasis mt-2" data-guest-env-off>
+            <i class="bi bi-lock me-1"></i>Está bloqueado en el servidor. Para poder activarlo, poné
+            <code>GUEST_ACCESS_ENABLED=true</code> en el <code>.env</code> y reiniciá el backend.
+          </div>
+          <div v-else class="small text-body-secondary mt-2">
+            Al desactivarlo, los visitantes que estén mirando salen en el momento.
+          </div>
+          <div v-if="errors.guest_access" class="small text-danger-emphasis mt-2">
+            <i class="bi bi-exclamation-circle me-1"></i>{{ errors.guest_access }}
           </div>
         </div>
       </section>

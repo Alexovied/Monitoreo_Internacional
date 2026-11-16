@@ -175,3 +175,52 @@ class ConfigApiTests(TestCase):
             response = self.client.post("/api/config/telegram-chats/", {}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("token", response.json()["detail"])
+
+
+@override_settings(INITIAL_CONFIG=VALID)
+class GuestAccessConfigTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user("jefe", password="x")
+        self.admin.groups.add(Group.objects.get(name=ADMIN_GROUP))
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        for target in ("configuration.views.send_config_sync", "configuration.views.disconnect_guests_sync"):
+            patcher = mock.patch(target)
+            setattr(self, target.rsplit(".", 1)[1], patcher.start())
+            self.addCleanup(patcher.stop)
+
+    def test_cannot_enable_when_env_forbids_it(self):
+        with self.settings(GUEST_ACCESS_ALLOWED=False):
+            data = self.client.get("/api/config/").json()
+            self.assertFalse(data["guest_access_allowed"])
+            response = self.client.patch("/api/config/", {"guest_access": True}, format="json")
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("guest_access", response.json())
+            self.assertFalse(SystemConfig.load().guest_access)
+
+    def test_enable_and_disable(self):
+        with self.settings(GUEST_ACCESS_ALLOWED=True):
+            response = self.client.patch("/api/config/", {"guest_access": True}, format="json")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["guest_access_enabled"])
+            self.disconnect_guests_sync.assert_not_called()
+
+            response = self.client.patch("/api/config/", {"guest_access": False}, format="json")
+            self.assertFalse(response.json()["guest_access_enabled"])
+            self.disconnect_guests_sync.assert_called_once()
+
+    def test_stale_value_does_not_block_other_changes(self):
+        # Estaba activado y después se apagó el .env: se puede seguir guardando lo demás.
+        config = SystemConfig.load()
+        config.guest_access = True
+        config.save()
+        with self.settings(GUEST_ACCESS_ALLOWED=False):
+            response = self.client.patch("/api/config/", {"zone_name": "OTRA", "guest_access": True}, format="json")
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.json()["guest_access_enabled"])
+
+    def test_regular_user_cannot_change_it(self):
+        user = User.objects.create_user("piloto", password="x")
+        client = APIClient()
+        client.force_authenticate(user)
+        self.assertEqual(client.patch("/api/config/", {"guest_access": True}, format="json").status_code, 403)

@@ -76,6 +76,9 @@ class SystemConfig(models.Model):
     )
     # Aviso de mantenimiento para todos los usuarios; vacío = sin aviso.
     maintenance_message = models.CharField("aviso de mantenimiento", max_length=300, blank=True, default="")
+    # Botón «Entrar como visitante» en el login. Solo vale si además el .env
+    # lo permite (GUEST_ACCESS_ENABLED); ver guest_access_enabled.
+    guest_access = models.BooleanField("acceso de visitantes", default=False)
     updated_at = models.DateTimeField("última modificación", auto_now=True)
 
     class Meta:
@@ -92,6 +95,11 @@ class SystemConfig(models.Model):
     @property
     def telegram_enabled(self):
         return bool(self.telegram_bot_token and self.telegram_chat_id)
+
+    @property
+    def guest_access_enabled(self):
+        """Si ahora se puede entrar como visitante: lo permiten el .env y la configuración."""
+        return settings.GUEST_ACCESS_ALLOWED and self.guest_access
 
     def clean(self):
         errors = {}
