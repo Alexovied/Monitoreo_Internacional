@@ -7,6 +7,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import dotSvg from 'bootstrap-icons/icons/circle-fill.svg?raw'
 import { SHAPES, shapeOf } from '../aircraftShapes'
 import { M_PER_NM } from '../format'
+import TOWERS from '../towers.json'
 
 const props = defineProps({
   aircraft: { type: Array, required: true },
@@ -332,10 +333,8 @@ function syncArea() {
   map.fitBounds(area, { animate: !first })
 }
 
-// Lo que se puede ver: el área de cobertura (círculo punteado) más un margen
-// chico. No tiene sentido alejarse más: fuera del círculo no hay aeronaves.
-// El zoom va en saltos enteros, así que a veces la vista mínima es algo más
-// grande que el área.
+// Vista inicial: el área de cobertura (círculo punteado) más un margen chico.
+// En esta versión el mapa se puede mover y alejar libremente.
 const COVERAGE_MARGIN = 0.15
 
 function coverageBounds() {
@@ -344,17 +343,22 @@ function coverageBounds() {
   return L.latLng(zone.lat, zone.lon).toBounds(sizeM)
 }
 
-// Zoom mínimo y desplazamiento limitados al área; se recalcula al cambiar el
-// radio de la consulta o el tamaño de la ventana.
 function applyViewLimits() {
   if (!map || !props.config) return null
-  const area = coverageBounds()
-  map.setMaxBounds(area)
-  // getBoundsZoom nunca devuelve menos que el minZoom vigente: sin liberarlo
-  // antes, al agrandar el radio el mínimo quedaría trabado en el anterior.
-  map.options.minZoom = 0
-  map.setMinZoom(map.getBoundsZoom(area, false))
-  return area
+  return coverageBounds()
+}
+
+// Aeropuertos con torre de control (datos de OurAirports, frecuencias TWR).
+function towerLayer() {
+  const icon = L.divIcon({ className: 'tower-icon', html: '<i class="bi bi-broadcast-pin"></i>', iconSize: [22, 22], iconAnchor: [11, 11] })
+  return L.layerGroup(
+    TOWERS.map((t) => {
+      const freqs = t.twr.map((f) => `${f} MHz`).join(' · ')
+      return L.marker([t.lat, t.lon], { icon, keyboard: false, zIndexOffset: -1000, title: `Torre ${t.icao}` }).bindTooltip(
+        `<b>Torre ${t.icao}</b><br>${t.name.replace(/[<>&]/g, '')}<br>${freqs}`,
+      )
+    }),
+  )
 }
 
 onMounted(() => {
@@ -381,7 +385,8 @@ onMounted(() => {
   }
   const initial = BASE_LAYERS[savedBaseLayer()] || BASE_LAYERS.terrain
   layers[initial.name].addTo(map)
-  L.control.layers(layers, null, { position: 'topright' }).addTo(map)
+  const towers = towerLayer().addTo(map)
+  L.control.layers(layers, { 'Torres de control': towers }, { position: 'topright' }).addTo(map)
   L.control.scale({ metric: true, imperial: false, maxWidth: 160 }).addTo(map)
   new CompassControl().addTo(map)
   if (hasGyro) {
@@ -396,7 +401,6 @@ onMounted(() => {
     }
   })
   map.on('click', () => emit('select', null))
-  map.on('resize', applyViewLimits)
 
   if (props.config) syncArea()
   else map.setView([-35.11, -58.73], 9)
@@ -447,6 +451,17 @@ defineExpose({ focus })
 </template>
 
 <style>
+.tower-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: #6f42c1;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  font-size: 12px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+}
 .aircraft-map {
   width: 100%;
   height: 100%;

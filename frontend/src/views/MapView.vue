@@ -283,6 +283,10 @@ function positionAge(ac) {
             </div>
           </div>
         </div>
+        <div class="d-flex align-items-center gap-2 mt-2 small">
+          <i class="bi bi-broadcast-pin legend-tower"></i>
+          <span><b>Torre de control</b> · pasá el mouse para ver su frecuencia</span>
+        </div>
         <!-- Formas de los íconos según el tipo de aeronave (categoría ADS-B). -->
         <div class="shape-legend mt-2 small">
           <span v-for="(s, key) in SHAPES" :key="key" class="d-inline-flex align-items-center gap-1">
@@ -443,6 +447,13 @@ function positionAge(ac) {
 }
 .map-legend summary {
   cursor: pointer;
+}
+.legend-tower {
+  color: #fff;
+  background: #6f42c1;
+  border-radius: 50%;
+  padding: 1px 4px;
+  font-size: 11px;
 }
 /* En la computadora las referencias siempre están abiertas. */
 @media (min-width: 992px) {
