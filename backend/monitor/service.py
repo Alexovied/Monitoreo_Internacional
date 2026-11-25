@@ -184,4 +184,10 @@ def start_with_daphne():
     """
     from twisted.internet import reactor
 
-    reactor.callWhenRunning(lambda: reactor.callLater(0, monitor.start))
+    from .system import temperature_watcher
+
+    def start():
+        monitor.start()
+        temperature_watcher.start()
+
+    reactor.callWhenRunning(lambda: reactor.callLater(0, start))

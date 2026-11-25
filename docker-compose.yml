@@ -7,8 +7,11 @@ services:
         required: true
     environment:
       SQLITE_PATH: /data/db.sqlite3
+      # Para mostrar la versión instalada en «Sistema» (solo lectura).
+      REPO_GIT_DIR: /repo/.git
     volumes:
       - ./backend:/app
+      - ./.git:/repo/.git:ro
       - backend-data:/data
     ports:
       - "8000:8000"

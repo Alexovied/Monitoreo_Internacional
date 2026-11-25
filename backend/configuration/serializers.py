@@ -34,6 +34,7 @@ class SystemConfigSerializer(serializers.ModelSerializer):
             "poll_interval_s", "query_radius_nm",
             "telegram_bot_token", "telegram_bot_token_masked", "telegram_chat_id", "telegram_enabled",
             "guest_access", "guest_access_allowed", "guest_access_enabled",
+            "temp_alert_enabled", "temp_alert_threshold_c",
             "maintenance_message", "updated_at",
         ]
         # El aviso se cambia solo con /config/maintenance/ (puede avisar por Telegram).

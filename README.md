@@ -135,6 +135,7 @@ Los usuarios registrados no ven esta pantalla y la API rechaza sus pedidos.
 | Frecuencia de actualización | En segundos, mínimo 2. Con 5 s alcanza para aviones de línea; menos solo adelanta el aviso unos segundos y consulta más seguido a un servicio gratuito. |
 | Radio de la consulta y del mapa | En NM, no menor que el radio de la zona y como máximo 250 (límite de adsb.fi). |
 | Telegram | Token del bot y chat id del grupo; se configuran juntos. El token se muestra enmascarado. |
+| Aviso de temperatura | Activado o no, y el límite en °C (entre 40 y 95). Ver [Sistema](#sistema-administrador). |
 
 ## Telegram
 
@@ -267,6 +268,18 @@ Se habilita en dos lugares, y hacen falta **los dos**:
 
 La protección es del backend, no solo del botón: si el acceso no está habilitado, `POST /api/auth/guest/` responde 403. Se comprueba en cada pedido y al abrir el WebSocket, así que al desactivarlo los visitantes que estaban mirando se desconectan en el momento y vuelven a la pantalla de ingreso.
 
+## Sistema (administrador)
+
+La pantalla **Sistema** muestra cómo está el equipo donde corre el monitor (la Raspberry Pi): temperatura del procesador, memoria en uso, espacio en disco y hace cuánto está encendido. Se actualiza sola cada 15 segundos. Los datos son del equipo, no del contenedor (se leen de `/sys/class/thermal`, `/proc` y el disco del volumen de datos). Si el equipo no informa la temperatura, se muestra «No disponible».
+
+**Versión:** muestra el commit instalado (con su mensaje y fecha) y cuántos cambios hay en GitHub que todavía no tiene, con un enlace para ver qué cambió. El commit se lee de la carpeta `.git` del proyecto, que `docker-compose.yml` monta en el backend en solo lectura (no hace falta git dentro del contenedor). La comparación la hace el backend con la API pública de GitHub (repositorio `GITHUB_REPO`) y la guarda 15 minutos, para no pasar el límite de 60 consultas por hora sin token. Para actualizar, en la Pi: `git pull` y `docker compose up -d --build`.
+
+**Aviso de temperatura** (en Configuración): si está activado, el backend revisa la temperatura cada minuto y manda un mensaje al grupo de Telegram cuando pasa el límite (por defecto 75 °C, se puede elegir entre 40 y 95 °C). Para no hacer spam:
+
+- avisa recién con **dos lecturas seguidas** por encima del límite (un pico suelto no cuenta);
+- manda **un solo** aviso por episodio, y uno más cuando la temperatura baja **5 °C** por debajo del límite;
+- entre dos avisos de calor pasa **al menos una hora**.
+
 ## Configuración inicial (.env)
 
 Docker Compose pasa el archivo `.env` al backend; **nunca se copia dentro de la imagen**. Contiene secretos (la clave de Django y el token del bot): no compartirlo ni subirlo a un repositorio (ya está en `.gitignore`).
@@ -283,6 +296,7 @@ Docker Compose pasa el archivo `.env` al backend; **nunca se copia dentro de la 
 | `LOG_LEVEL` | Nivel del log (`DEBUG`, `INFO`, `WARNING`…). | `INFO` |
 | `MONITOR_ENABLED` | `false` levanta la web sin consultar adsb.fi (para depurar). | `true` |
 | `ADSBFI_USER_AGENT` | Identificación que se envía a adsb.fi. | `avion-monitor/0.1 (monitor privado de aeronaves)` |
+| `GITHUB_REPO` | Repositorio de GitHub con el que se compara la versión instalada (pantalla Sistema). Vacío = no consultar. | `Alexovied/Monitoreo_Internacional` |
 | `ZONE_NAME`, `ZONE_LAT`, `ZONE_LON`, `ZONE_RADIUS_NM`, `ZONE_FLOOR_M`, `ZONE_CEILING_M` | Zona de alerta inicial. | ALERTA CNA 10KM |
 | `POLL_INTERVAL_S` | Frecuencia inicial de consulta (s, mínimo 2). | `5` |
 | `QUERY_RADIUS_NM` | Radio inicial de consulta y mapa (NM, máximo 250). | `50` |
@@ -429,6 +443,8 @@ Todas las rutas exigen sesión, salvo `csrf`, `login`, `guest` y `options`. Un v
 | `GET, PUT, PATCH /api/config/` | Configuración (el token se devuelve enmascarado). | Admin |
 | `POST /api/config/openair/` | Archivo OpenAir (`multipart`, campo `file`): devuelve los campos de la zona **sin guardarlos**. | Admin |
 | `POST /api/config/telegram-test/` | Envía un mensaje de prueba al grupo. | Admin |
+| `GET /api/system/` | Temperatura, memoria, disco y tiempo encendido del equipo, y el ajuste del aviso de temperatura. | Admin |
+| `GET /api/system/version/` | Commit instalado y cuántos cambios hay en GitHub que no tiene (`updates.behind`). | Admin |
 | `GET /api/health/` | Estado del backend. | — |
 
 **WebSocket** `ws://<host>/ws/aircraft/`: solo envía datos del servidor al navegador, en JSON con un campo `type`.

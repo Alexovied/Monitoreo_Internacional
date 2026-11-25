@@ -8,9 +8,12 @@ import { dec1, dms, int, isNumber, M_PER_FT } from '../format'
 
 const MAX_RADIUS_NM = 250
 const MIN_POLL_S = 2 // igual que MIN_POLL_INTERVAL_S del backend
+const MIN_TEMP_C = 40 // igual que MIN_TEMP_ALERT_C y MAX_TEMP_ALERT_C del backend
+const MAX_TEMP_C = 95
 const FIELDS = [
   'zone_name', 'zone_lat', 'zone_lon', 'zone_radius_nm', 'zone_floor_m', 'zone_ceiling_m',
   'poll_interval_s', 'query_radius_nm', 'telegram_chat_id', 'guest_access',
+  'temp_alert_enabled', 'temp_alert_threshold_c',
 ]
 const NOTICE_STYLE = {
   ok: { cls: 'alert-success', icon: 'bi-check-circle-fill' },
@@ -81,6 +84,8 @@ function validate() {
   if (!(ceiling > 0)) e.zone_ceiling_m = 'Tiene que ser mayor que 0.'
   else if (floor >= 0 && !(ceiling > floor)) e.zone_ceiling_m = 'Tiene que ser más alta que la altura mínima.'
   if (!(Number.isInteger(poll) && poll >= MIN_POLL_S)) e.poll_interval_s = `Un número entero, de ${MIN_POLL_S} segundos o más.`
+  const tempLimit = num(form.temp_alert_threshold_c)
+  if (!(tempLimit >= MIN_TEMP_C && tempLimit <= MAX_TEMP_C)) e.temp_alert_threshold_c = `Entre ${MIN_TEMP_C} y ${MAX_TEMP_C} °C.`
   if (!(query > 0 && query <= MAX_RADIUS_NM)) e.query_radius_nm = `Entre 0 y ${MAX_RADIUS_NM} NM.`
   else if (radius > 0 && query < radius) e.query_radius_nm = 'Tiene que ser igual o mayor que el radio de la zona.'
 
@@ -113,6 +118,8 @@ function payload() {
     query_radius_nm: num(form.query_radius_nm),
     telegram_chat_id: String(form.telegram_chat_id).trim(),
     guest_access: !!form.guest_access,
+    temp_alert_enabled: !!form.temp_alert_enabled,
+    temp_alert_threshold_c: num(form.temp_alert_threshold_c),
   }
   if (token.value.trim()) body.telegram_bot_token = token.value.trim()
   return body
@@ -462,6 +469,40 @@ onMounted(load)
           </div>
           <div v-if="errors.guest_access" class="small text-danger-emphasis mt-2">
             <i class="bi bi-exclamation-circle me-1"></i>{{ errors.guest_access }}
+          </div>
+        </div>
+      </section>
+
+      <!-- Temperatura del equipo -->
+      <section class="card shadow-sm mb-3" data-section="temperature">
+        <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
+          <div>
+            <h2 class="h5 mb-0"><i class="bi bi-thermometer-high text-danger me-2"></i>Aviso de temperatura</h2>
+            <div class="small text-body-secondary">
+              Manda un mensaje al grupo de Telegram si el equipo se calienta demasiado, y otro cuando vuelve a la normalidad.
+              No se repite: como mucho un aviso de calor por hora.
+            </div>
+          </div>
+          <span class="badge" :class="saved.temp_alert_enabled ? 'text-bg-success' : 'text-bg-secondary'">
+            <i class="bi me-1" :class="saved.temp_alert_enabled ? 'bi-check-circle' : 'bi-dash-circle'"></i>
+            {{ saved.temp_alert_enabled ? 'Activado' : 'Desactivado' }}
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 align-items-start">
+            <div class="col-md-6">
+              <div class="form-check form-switch mt-md-4">
+                <input id="temp_alert_enabled" v-model="form.temp_alert_enabled" class="form-check-input" type="checkbox" role="switch" />
+                <label class="form-check-label" for="temp_alert_enabled">Avisar cuando el equipo esté caliente</label>
+              </div>
+              <div v-if="!saved.telegram_enabled" class="small text-warning-emphasis mt-2">
+                <i class="bi bi-exclamation-triangle me-1"></i>Primero conectá Telegram: sin eso el aviso no llega.
+              </div>
+            </div>
+            <FormField id="temp_alert_threshold_c" v-model="form.temp_alert_threshold_c" class="col-md-6" label="Avisar a partir de"
+              icon="bi-thermometer-half" type="number" step="1" :min="MIN_TEMP_C" :max="MAX_TEMP_C" unit="°C"
+              hint="Recomendado: 75 °C. La Raspberry Pi se pone lenta a 80 °C."
+              :error="errors.temp_alert_threshold_c" />
           </div>
         </div>
       </section>

@@ -10,6 +10,11 @@ from monitor.adsbfi import MAX_RADIUS_NM as ADSBFI_MAX_RADIUS_NM
 # con la separación mínima entre consultas del monitor (MIN_REQUEST_GAP_S).
 MIN_POLL_INTERVAL_S = 2
 
+# Límites para la temperatura del aviso de calor del equipo (Raspberry Pi:
+# baja la velocidad a 80 °C y se apaga a 85 °C).
+MIN_TEMP_ALERT_C = 40
+MAX_TEMP_ALERT_C = 95
+
 
 def validate_positive(value):
     if value is None or value <= 0:
@@ -79,6 +84,13 @@ class SystemConfig(models.Model):
     # Botón «Entrar como visitante» en el login. Solo vale si además el .env
     # lo permite (GUEST_ACCESS_ENABLED); ver guest_access_enabled.
     guest_access = models.BooleanField("acceso de visitantes", default=False)
+    # Aviso por Telegram cuando el equipo se calienta (ver monitor.system).
+    temp_alert_enabled = models.BooleanField("aviso de temperatura", default=False)
+    temp_alert_threshold_c = models.FloatField(
+        "temperatura límite (°C)",
+        default=75,
+        validators=[MinValueValidator(MIN_TEMP_ALERT_C), MaxValueValidator(MAX_TEMP_ALERT_C)],
+    )
     updated_at = models.DateTimeField("última modificación", auto_now=True)
 
     class Meta:

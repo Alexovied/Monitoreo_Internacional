@@ -148,6 +148,12 @@ ADSBFI_USER_AGENT = (
     or "avion-monitor/0.1 (monitor privado de aeronaves)"
 )
 
+# Versión instalada: carpeta .git del proyecto (en Docker se monta en solo
+# lectura) y repositorio de GitHub contra el que se compara. GITHUB_REPO vacío
+# = no consultar GitHub.
+REPO_GIT_DIR = os.environ.get("REPO_GIT_DIR", "").strip() or str(BASE_DIR.parent / ".git")
+GITHUB_REPO = os.environ.get("GITHUB_REPO", "Alexovied/Monitoreo_Internacional").strip().strip("/")
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

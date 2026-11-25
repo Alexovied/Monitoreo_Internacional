@@ -224,3 +224,45 @@ class GuestAccessConfigTests(TestCase):
         client = APIClient()
         client.force_authenticate(user)
         self.assertEqual(client.patch("/api/config/", {"guest_access": True}, format="json").status_code, 403)
+
+
+@override_settings(INITIAL_CONFIG=VALID)
+class SystemInfoApiTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user("jefe", password="x")
+        self.admin.groups.add(Group.objects.get(name=ADMIN_GROUP))
+        self.user = User.objects.create_user("piloto", password="x")
+        self.user.groups.add(Group.objects.get(name=USER_GROUP))
+
+    def test_admin_only(self):
+        client = APIClient()
+        client.force_authenticate(self.user)
+        self.assertEqual(client.get("/api/system/").status_code, 403)
+        self.assertEqual(client.get("/api/system/version/").status_code, 403)
+
+    def test_returns_info_and_alert_settings(self):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        data = client.get("/api/system/").json()
+        self.assertIn("temperature_c", data)
+        self.assertIn("percent", data["disk"])
+        self.assertEqual(data["temp_alert"], {"enabled": False, "threshold_c": 75, "telegram_enabled": False})
+
+    def test_threshold_limits(self):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        with mock.patch("configuration.views.send_config_sync"), mock.patch("configuration.views.monitor"):
+            self.assertEqual(client.patch("/api/config/", {"temp_alert_threshold_c": 30}, format="json").status_code, 400)
+            response = client.patch("/api/config/", {"temp_alert_enabled": True, "temp_alert_threshold_c": 70},
+                                    format="json")
+        self.assertEqual(response.status_code, 200, response.json())
+        config = SystemConfig.load()
+        self.assertTrue(config.temp_alert_enabled)
+        self.assertEqual(config.temp_alert_threshold_c, 70)
+
+    def test_version_endpoint(self):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        info = {"sha": "a" * 40, "branch": "main", "repo_url": "https://github.com/x/y", "updates": None}
+        with mock.patch("configuration.views.version.version_info", return_value=info):
+            self.assertEqual(client.get("/api/system/version/").json(), info)

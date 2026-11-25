@@ -25,6 +25,12 @@ const router = createRouter({
       component: () => import('./views/ConfigView.vue'),
       meta: { admin: true, title: 'Configuración' },
     },
+    {
+      path: '/sistema',
+      name: 'system',
+      component: () => import('./views/SystemView.vue'),
+      meta: { admin: true, title: 'Sistema' },
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })

@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from accounts.permissions import IsAdmin
 from monitor.broadcast import disconnect_guests_sync, send_config_sync
 from monitor.openair import OpenAirError, decode_openair_bytes, parse_openair
+from monitor import system, version
 from monitor.service import monitor
 from monitor.telegram import TelegramError, find_group_chats, send_maintenance, send_test_message
 
@@ -123,3 +124,28 @@ class TelegramChatsView(APIView):
         except TelegramError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"chats": chats})
+
+
+class SystemInfoView(APIView):
+    """Temperatura, memoria y disco del equipo donde corre el sistema."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        config = SystemConfig.load()
+        info = system.snapshot()
+        info["temp_alert"] = {
+            "enabled": config.temp_alert_enabled,
+            "threshold_c": config.temp_alert_threshold_c,
+            "telegram_enabled": config.telegram_enabled,
+        }
+        return Response(info)
+
+
+class VersionView(APIView):
+    """Commit instalado y cuántos cambios hay en GitHub que todavía no tiene."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        return Response(version.version_info())

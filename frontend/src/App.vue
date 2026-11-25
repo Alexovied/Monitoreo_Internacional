@@ -85,6 +85,9 @@ async function onLogout() {
             <li class="nav-item">
               <RouterLink class="nav-link px-3 rounded" to="/configuracion"><i class="bi bi-gear me-1"></i> Configuración</RouterLink>
             </li>
+            <li class="nav-item">
+              <RouterLink class="nav-link px-3 rounded" to="/sistema"><i class="bi bi-cpu me-1"></i> Sistema</RouterLink>
+            </li>
           </template>
         </ul>
 
