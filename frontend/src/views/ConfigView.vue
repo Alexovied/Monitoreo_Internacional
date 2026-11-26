@@ -24,6 +24,9 @@ const NOTICE_STYLE = {
 const saved = ref(null) // última configuración recibida del servidor
 const form = reactive(Object.fromEntries(FIELDS.map((f) => [f, ''])))
 const token = ref('') // nuevo token; vacío = conservar el guardado
+const excluded = ref([]) // aeronaves que no generan alerta (código ICAO o matrícula)
+const newExcluded = ref('')
+const excludedError = ref('')
 const errors = ref({})
 const notice = ref(null) // { kind: 'ok' | 'error' | 'info', text }
 const loading = ref(true)
@@ -32,7 +35,11 @@ const testing = ref(false)
 const fileInput = ref(null)
 
 const dirty = computed(
-  () => !!saved.value && (token.value !== '' || FIELDS.some((f) => String(form[f]) !== String(saved.value[f]))),
+  () =>
+    !!saved.value &&
+    (token.value !== '' ||
+      FIELDS.some((f) => String(form[f]) !== String(saved.value[f])) ||
+      JSON.stringify(excluded.value) !== JSON.stringify(saved.value.excluded_aircraft || [])),
 )
 const telegramDirty = computed(
   () => !!saved.value && (token.value !== '' || String(form.telegram_chat_id) !== String(saved.value.telegram_chat_id)),
@@ -41,6 +48,9 @@ const telegramDirty = computed(
 function fill(config) {
   saved.value = config
   for (const f of FIELDS) form[f] = config[f]
+  excluded.value = [...(config.excluded_aircraft || [])]
+  newExcluded.value = ''
+  excludedError.value = ''
   token.value = ''
 }
 
@@ -121,6 +131,7 @@ function payload() {
     temp_alert_enabled: !!form.temp_alert_enabled,
     temp_alert_threshold_c: num(form.temp_alert_threshold_c),
   }
+  body.excluded_aircraft = [...excluded.value]
   if (token.value.trim()) body.telegram_bot_token = token.value.trim()
   return body
 }
@@ -263,6 +274,49 @@ async function loadOpenAir(event) {
   }
 }
 
+// Aeronaves sin alerta: código ICAO (hex de 6 caracteres, como informa adsb.fi)
+// o matrícula. Se guardan en mayúsculas y sin espacios, igual que en el backend.
+const HEX_RE = /^~?[0-9A-F]{6}$/
+const REGISTRATION_RE = /^[A-Z0-9][A-Z0-9-]{1,9}$/
+const normalizeId = (v) => String(v).replace(/\s+/g, '').toUpperCase()
+const matchKey = (v) => normalizeId(v).replace(/-/g, '')
+
+function addExcluded() {
+  const value = normalizeId(newExcluded.value)
+  excludedError.value = ''
+  if (!value) return
+  if (!HEX_RE.test(value) && !REGISTRATION_RE.test(value)) {
+    excludedError.value = 'No parece un código ICAO (6 caracteres, p. ej. E0B390) ni una matrícula (p. ej. PR-ABC).'
+    return
+  }
+  if (excluded.value.some((v) => matchKey(v) === matchKey(value))) {
+    excludedError.value = `${value} ya está en la lista.`
+    return
+  }
+  excluded.value = [...excluded.value, value]
+  newExcluded.value = ''
+}
+
+function removeExcluded(value) {
+  excluded.value = excluded.value.filter((v) => v !== value)
+}
+
+// Aeronave del mapa que coincide con un código o matrícula de la lista (si se está viendo ahora).
+function visibleMatch(value) {
+  const key = matchKey(value)
+  return live.aircraft.find((a) => matchKey(a.hex) === key || (a.registration && matchKey(a.registration) === key)) || null
+}
+
+// Sugerencias al escribir: las aeronaves que se ven ahora en el mapa.
+const suggestions = computed(() =>
+  live.aircraft
+    .filter((a) => !a.hex.startsWith('demo'))
+    .map((a) => ({
+      value: a.registration || a.hex.toUpperCase(),
+      label: [a.flight, a.registration, a.hex.toUpperCase(), a.type].filter(Boolean).join(' · '),
+    })),
+)
+
 const ft = (m) => (isNumber(num(m)) ? int(num(m) / M_PER_FT) : '—')
 const km = (nm) => (isNumber(num(nm)) ? dec1(num(nm) * 1.852) : '—')
 
@@ -341,6 +395,70 @@ onMounted(load)
               icon="bi-circle" type="number" step="any" min="0" :max="MAX_RADIUS_NM" unit="NM"
               :hint="`Unos ${km(form.query_radius_nm)} km. Es también lo que abarca el mapa. Máximo ${MAX_RADIUS_NM} NM.`" :error="errors.query_radius_nm" />
           </div>
+        </div>
+      </section>
+
+      <!-- Aeronaves sin alerta -->
+      <section class="card shadow-sm mb-3" data-section="excluded">
+        <div class="card-header bg-body py-3">
+          <h2 class="h5 mb-0"><i class="bi bi-bell-slash me-2"></i>Aviones que no dan alerta</h2>
+          <div class="small text-body-secondary">
+            Por ejemplo, los aviones propios del aeródromo: se siguen viendo en el mapa, pero cuando entran en la zona no
+            suena la alerta ni se manda a Telegram. Así solo avisan los aviones ajenos.
+          </div>
+        </div>
+        <div class="card-body">
+          <label for="excluded_new" class="form-label fw-semibold small mb-1">Agregar avión</label>
+          <div class="input-group has-validation">
+            <span class="input-group-text"><i class="bi bi-airplane"></i></span>
+            <input
+              id="excluded_new"
+              v-model="newExcluded"
+              class="form-control excluded-input"
+              :class="{ 'is-invalid': excludedError || errors.excluded_aircraft }"
+              list="excluded_suggestions"
+              autocomplete="off"
+              maxlength="20"
+              placeholder="Código ICAO (E0B390) o matrícula (PR-ABC)"
+              @keydown.enter.prevent="addExcluded"
+            />
+            <button class="btn btn-outline-primary" type="button" data-add-excluded :disabled="!newExcluded.trim()" @click="addExcluded">
+              <i class="bi bi-plus-lg me-1"></i> Agregar
+            </button>
+            <div v-if="excludedError || errors.excluded_aircraft" class="invalid-feedback">
+              {{ excludedError || errors.excluded_aircraft }}
+            </div>
+          </div>
+          <datalist id="excluded_suggestions">
+            <option v-for="s in suggestions" :key="s.value" :value="s.value">{{ s.label }}</option>
+          </datalist>
+          <div class="form-text">
+            El <b>código ICAO</b> (o «hex») es la dirección fija de 6 caracteres del transpondedor de cada avión; en el
+            mapa aparece como «Código» al elegir un avión. También sirve la matrícula. Mientras escribís se sugieren los
+            aviones que se ven ahora en el mapa.
+          </div>
+
+          <div class="mt-3" data-excluded-list>
+            <p v-if="!excluded.length" class="small text-body-secondary mb-0">
+              <i class="bi bi-info-circle me-1"></i>No hay ninguno: todos los aviones que entran en la zona dan alerta.
+            </p>
+            <div v-else class="d-flex flex-wrap gap-2">
+              <span
+                v-for="id in excluded"
+                :key="id"
+                class="badge rounded-pill text-bg-light border d-inline-flex align-items-center gap-2 py-2 ps-3 pe-2 fs-6 fw-semibold"
+              >
+                <span>
+                  {{ id }}
+                  <span v-if="visibleMatch(id)" class="small fw-normal text-success-emphasis" title="Se ve ahora en el mapa">
+                    · {{ visibleMatch(id).flight || visibleMatch(id).registration || visibleMatch(id).type || 'en el mapa' }}
+                  </span>
+                </span>
+                <button type="button" class="btn-close btn-close-sm" :aria-label="`Quitar ${id}`" @click="removeExcluded(id)"></button>
+              </span>
+            </div>
+          </div>
+          <div v-if="excluded.length" class="small text-body-secondary mt-2">Los cambios valen cuando tocás «Guardar».</div>
         </div>
       </section>
 
@@ -596,6 +714,15 @@ onMounted(load)
 </template>
 
 <style scoped>
+.excluded-input {
+  text-transform: uppercase;
+}
+.excluded-input::placeholder {
+  text-transform: none;
+}
+.btn-close-sm {
+  font-size: 0.6rem;
+}
 .save-bar {
   position: sticky;
   bottom: 0.75rem;

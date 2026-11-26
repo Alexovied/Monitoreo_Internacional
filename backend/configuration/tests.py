@@ -30,6 +30,12 @@ class ValidationTests(TestCase):
     def test_valid_defaults(self):
         make().full_clean()
 
+    def test_excluded_aircraft(self):
+        make(excluded_aircraft=["E0B390", "PR-ABC"]).full_clean()
+        self.assertInvalid("excluded_aircraft", excluded_aircraft=["E0B390", "no vale"])
+        self.assertInvalid("excluded_aircraft", excluded_aircraft="E0B390")
+        self.assertInvalid("excluded_aircraft", excluded_aircraft=[f"PR-A{i:02d}" for i in range(201)])
+
     def test_coordinates_range(self):
         self.assertInvalid("zone_lat", zone_lat=-90.1)
         self.assertInvalid("zone_lat", zone_lat=90.1)

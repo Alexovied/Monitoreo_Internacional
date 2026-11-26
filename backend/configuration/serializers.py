@@ -4,6 +4,8 @@ from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from monitor import exclusions
+
 from .models import SystemConfig, telegram_token_validator
 
 
@@ -35,7 +37,7 @@ class SystemConfigSerializer(serializers.ModelSerializer):
             "telegram_bot_token", "telegram_bot_token_masked", "telegram_chat_id", "telegram_enabled",
             "guest_access", "guest_access_allowed", "guest_access_enabled",
             "temp_alert_enabled", "temp_alert_threshold_c",
-            "maintenance_message", "updated_at",
+            "excluded_aircraft", "maintenance_message", "updated_at",
         ]
         # El aviso se cambia solo con /config/maintenance/ (puede avisar por Telegram).
         read_only_fields = ["maintenance_message", "updated_at"]
@@ -54,6 +56,19 @@ class SystemConfigSerializer(serializers.ModelSerializer):
                 "primero hay que poner GUEST_ACCESS_ENABLED=true en el .env."
             )
         return value
+
+    def validate_excluded_aircraft(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Tiene que ser una lista de códigos o matrículas.")
+        # Se guardan en mayúsculas, sin espacios ni repetidos, en el orden en que llegaron.
+        cleaned = []
+        for item in value:
+            if not isinstance(item, str):
+                raise serializers.ValidationError("Tiene que ser una lista de códigos o matrículas.")
+            item = exclusions.normalize(item)
+            if item and item not in cleaned:
+                cleaned.append(item)
+        return cleaned
 
     def validate(self, attrs):
         for key in ("telegram_bot_token", "telegram_chat_id", "zone_name"):

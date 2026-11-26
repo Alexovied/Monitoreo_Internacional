@@ -61,13 +61,13 @@ function headingOf(ac) {
 
 function iconKey(ac) {
   const h = headingOf(ac)
-  return [h === null ? 'x' : Math.round(h), shapeOf(ac), ac.inside, ac.alt_baro === 'ground', ac.hex === props.selectedHex, ac.hex === flashHex].join('|')
+  return [h === null ? 'x' : Math.round(h), shapeOf(ac), ac.inside && !ac.excluded, ac.alt_baro === 'ground', ac.hex === props.selectedHex, ac.hex === flashHex].join('|')
 }
 
 function makeIcon(ac) {
   const h = headingOf(ac)
   const classes = ['ac-icon']
-  if (ac.inside) classes.push('inside')
+  if (ac.inside && !ac.excluded) classes.push('inside') // los que no dan alerta no se pintan de rojo
   if (ac.alt_baro === 'ground') classes.push('ground')
   if (ac.hex === props.selectedHex) classes.push('selected')
   if (ac.hex === flashHex) classes.push('flash')

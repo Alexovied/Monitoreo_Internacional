@@ -105,6 +105,8 @@ Cuando una aeronave entra a la zona aparece un aviso en pantalla para todos los 
 
 El aviso se genera **solo al entrar**: no se repite mientras la aeronave sigue adentro. Si sale y vuelve a entrar, avisa de nuevo.
 
+**Aviones que no dan alerta.** En **Configuración** se puede armar una lista de aeronaves que nunca generan aviso, por ejemplo los aviones propios de un aeródromo, para que solo avisen los ajenos. Cada una se indica por su **código ICAO** (la dirección fija de 6 caracteres hexadecimales del transpondedor, el `hex` de adsb.fi, p. ej. `E48A1B`; en el mapa aparece como «Código» al elegir la aeronave) o por su **matrícula** (p. ej. `PR-ABC`). No importan mayúsculas, espacios ni guiones. Esas aeronaves se siguen viendo en el mapa, pero no se pintan de rojo, llevan el ícono de campana tachada y al entrar en la zona no suenan ni se mandan a Telegram (en el log del backend queda registrado el ingreso). Si se quita una aeronave de la lista mientras ya está dentro de la zona, avisa recién en su próximo ingreso.
+
 > El navegador solo permite sonido después de que el usuario hizo clic en la página. Si se recarga la página con la sesión ya iniciada, el sonido empieza a funcionar después del primer clic.
 
 ### Usuarios (administrador)
@@ -134,6 +136,7 @@ Los usuarios registrados no ven esta pantalla y la API rechaza sus pedidos.
 | Altura superior | En metros, mayor que la inferior. |
 | Frecuencia de actualización | En segundos, mínimo 2. Con 5 s alcanza para aviones de línea; menos solo adelanta el aviso unos segundos y consulta más seguido a un servicio gratuito. |
 | Radio de la consulta y del mapa | En NM, no menor que el radio de la zona y como máximo 250 (límite de adsb.fi). |
+| Aviones que no dan alerta | Código ICAO (6 caracteres hex) o matrícula; hasta 200. Se guardan en mayúsculas y sin repetidos. |
 | Telegram | Token del bot y chat id del grupo; se configuran juntos. El token se muestra enmascarado. |
 | Aviso de temperatura | Activado o no, y el límite en °C (entre 40 y 95). Ver [Sistema](#sistema-administrador). |
 
@@ -300,9 +303,10 @@ Docker Compose pasa el archivo `.env` al backend; **nunca se copia dentro de la 
 | `ZONE_NAME`, `ZONE_LAT`, `ZONE_LON`, `ZONE_RADIUS_NM`, `ZONE_FLOOR_M`, `ZONE_CEILING_M` | Zona de alerta inicial. | ALERTA CNA 10KM |
 | `POLL_INTERVAL_S` | Frecuencia inicial de consulta (s, mínimo 2). | `5` |
 | `QUERY_RADIUS_NM` | Radio inicial de consulta y mapa (NM, máximo 250). | `50` |
+| `EXCLUDED_AIRCRAFT` | Aviones iniciales que no dan alerta: códigos ICAO o matrículas separados por comas. | `E48A1B,PR-ABC` |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram inicial; vacíos = sin Telegram. | — |
 
-> **Importante:** las variables `ZONE_*`, `POLL_INTERVAL_S`, `QUERY_RADIUS_NM` y `TELEGRAM_*` se usan **solo la primera vez**, cuando la base de datos está vacía. Después mandan los valores guardados desde la web, y cambiar el `.env` ya no tiene efecto sobre ellos. Si un valor inicial es inválido, el backend no arranca y el log explica cuál.
+> **Importante:** las variables `ZONE_*`, `POLL_INTERVAL_S`, `QUERY_RADIUS_NM`, `EXCLUDED_AIRCRAFT` y `TELEGRAM_*` se usan **solo la primera vez**, cuando la base de datos está vacía. Después mandan los valores guardados desde la web, y cambiar el `.env` ya no tiene efecto sobre ellos. Si un valor inicial es inválido, el backend no arranca y el log explica cuál.
 
 Para que los cambios en el `.env` se apliquen hay que recrear el contenedor: `docker compose up -d --force-recreate backend`.
 

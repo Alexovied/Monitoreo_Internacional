@@ -14,7 +14,7 @@ from django.conf import settings
 
 from configuration.models import SystemConfig
 
-from . import adsbfi, broadcast
+from . import adsbfi, broadcast, exclusions
 from .alerts import build_alert
 from .state import AircraftState
 from .telegram import TelegramNotifier
@@ -52,6 +52,7 @@ class Monitor:
         self.state = AircraftState()
         self.status = {"ok": None, "error": None, "last_update": None, "failures": 0}
         self._failures = 0
+        self._excluded = frozenset()  # aeronaves que no generan alerta (claves de exclusions)
         self._last_request_at = None
         self._server_clock = None  # (now del servidor, clock local) de la última respuesta
         self._loop = None
@@ -109,6 +110,7 @@ class Monitor:
         """Ejecuta un ciclo y devuelve cuántos segundos esperar hasta el próximo."""
         config = await self.load_config()
         zone = Zone.from_config(config)
+        self._excluded = exclusions.excluded_keys(getattr(config, "excluded_aircraft", None))
         query = (config.zone_lat, config.zone_lon, config.query_radius_nm)
 
         await self._respect_request_gap()
@@ -129,6 +131,10 @@ class Monitor:
         self._set_status(ok=True, error=None, last_update=snapshot.now)
 
         for aircraft in result.entered:
+            if exclusions.is_excluded(aircraft, self._excluded):
+                logger.info("%s ingresó a %s; no se alerta porque está en la lista de aeronaves sin alerta.",
+                            aircraft.label, zone.name)
+                continue
             alert = build_alert(aircraft, zone)
             logger.info("ALERTA: %s ingresó a %s (alt %s ft, %s kt, rumbo %s°, %.1f NM).",
                         alert["label"], zone.name, alert["alt_ft"], alert["gs"], alert["track"], alert["dst"])
@@ -137,7 +143,7 @@ class Monitor:
         for hex_code in result.exited:
             logger.info("%s salió de la zona.", hex_code)
 
-        await self.publisher.send_aircraft(self.state.payload(), self.status)
+        await self.publisher.send_aircraft(self.aircraft_payload(), self.status)
         return config.poll_interval_s
 
     async def _handle_failure(self, config, exc):
@@ -150,8 +156,12 @@ class Monitor:
             server_now, at = self._server_clock
             self.state.purge(server_now + (self.clock() - at))
         self._set_status(ok=False, error=str(exc))
-        await self.publisher.send_aircraft(self.state.payload(), self.status)
+        await self.publisher.send_aircraft(self.aircraft_payload(), self.status)
         return delay
+
+    def aircraft_payload(self):
+        """Aeronaves para los navegadores, con la marca de las que no generan alerta."""
+        return self.state.payload(self._excluded)
 
     def _log_incomplete(self, result):
         for hex_code, missing in result.newly_incomplete.items():

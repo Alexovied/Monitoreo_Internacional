@@ -55,6 +55,20 @@ class ConfigApiTests(TestCase):
         self.assertNotIn("telegram_bot_token", data)
         self.assertTrue(data["telegram_enabled"])
 
+    def test_patch_excluded_aircraft_is_normalized(self):
+        with mock.patch("configuration.views.monitor"):
+            response = self.client.patch(
+                "/api/config/", {"excluded_aircraft": [" e0b390 ", "pr-abc", "E0B390", ""]}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["excluded_aircraft"], ["E0B390", "PR-ABC"])
+        self.assertEqual(SystemConfig.load().excluded_aircraft, ["E0B390", "PR-ABC"])
+
+    def test_patch_excluded_aircraft_rejects_invalid(self):
+        response = self.client.patch("/api/config/", {"excluded_aircraft": ["E0B390", "#$%"]}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("#$%", str(response.json()["excluded_aircraft"]))
+        self.assertEqual(SystemConfig.load().excluded_aircraft, [])
+
     def test_patch_updates_broadcasts_and_refreshes(self):
         with mock.patch("configuration.views.monitor") as monitor:
             response = self.client.patch("/api/config/", {"poll_interval_s": 10, "zone_name": " NUEVA "}, format="json")

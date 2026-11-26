@@ -21,7 +21,7 @@ const mapRef = ref(null)
 const listRef = ref(null)
 
 const sorted = computed(() => [...live.aircraft].sort((a, b) => a.dst - b.dst))
-const insideCount = computed(() => live.aircraft.filter((a) => a.inside).length)
+const insideCount = computed(() => live.aircraft.filter((a) => a.inside && !a.excluded).length)
 const selected = computed(() => live.aircraft.find((a) => a.hex === live.selectedHex) || null)
 const zone = computed(() => live.config?.zone)
 
@@ -230,7 +230,8 @@ function positionAge(ac) {
       <div v-if="selected" class="mobile-card d-lg-none position-absolute bg-body shadow rounded-3 p-2" data-mobile-card>
         <div class="d-flex align-items-center gap-2">
           <strong class="text-truncate">{{ identification(selected) }}</strong>
-          <span v-if="selected.inside" class="badge text-bg-danger">EN LA ZONA</span>
+          <span v-if="selected.inside && selected.excluded" class="badge text-bg-secondary" title="Está en la lista de aviones que no dan alerta">EN LA ZONA · SIN ALERTA</span>
+          <span v-else-if="selected.inside" class="badge text-bg-danger">EN LA ZONA</span>
           <button type="button" class="btn-close ms-auto" aria-label="Cerrar ficha" @click="live.selectedHex = null"></button>
         </div>
         <div class="d-flex flex-wrap column-gap-3 small mt-1">
@@ -302,7 +303,9 @@ function positionAge(ac) {
         <div v-if="selected" class="details">
           <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
             <strong class="fs-6">{{ identification(selected) }}</strong>
-            <span v-if="selected.inside" class="badge text-bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>EN LA ZONA</span>
+            <span v-if="selected.inside && selected.excluded" class="badge text-bg-secondary" title="Está en la lista de aviones que no dan alerta"><i class="bi bi-bell-slash me-1"></i>EN LA ZONA · SIN ALERTA</span>
+            <span v-else-if="selected.inside" class="badge text-bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>EN LA ZONA</span>
+            <span v-else-if="selected.excluded" class="badge text-bg-secondary" title="Está en la lista de aviones que no dan alerta"><i class="bi bi-bell-slash me-1"></i>SIN ALERTA</span>
           </div>
           <dl class="row small mb-0">
             <dt class="col-4 fw-normal text-body-secondary">Tipo</dt>
@@ -365,11 +368,12 @@ function positionAge(ac) {
             :key="ac.hex"
             type="button"
             class="list-group-item list-group-item-action d-flex align-items-center gap-2 py-2"
-            :class="{ active: ac.hex === live.selectedHex, 'list-group-item-danger': ac.inside && ac.hex !== live.selectedHex }"
+            :class="{ active: ac.hex === live.selectedHex, 'list-group-item-danger': ac.inside && !ac.excluded && ac.hex !== live.selectedHex }"
             @click="pick(ac.hex)"
           >
             <i class="bi" :class="ac.alt_baro === 'ground' ? 'bi-airplane-engines' : 'bi-airplane-fill'"></i>
-            <span class="fw-semibold flex-grow-1 text-truncate">{{ ac.flight || ac.registration || ac.hex.toUpperCase() }}</span>
+            <span class="fw-semibold flex-grow-1 text-truncate">{{ ac.flight || ac.registration || ac.hex.toUpperCase() }}<i
+                v-if="ac.excluded" class="bi bi-bell-slash ms-1 opacity-50" title="No da alerta"></i></span>
             <span class="small opacity-75" style="width: 3em">{{ ac.type || '' }}</span>
             <span class="small text-end text-nowrap" style="width: 4.8em">{{ altitudeShort(ac.alt_baro) }}</span>
             <span class="small text-end text-nowrap opacity-75" style="width: 4.6em">{{ dec1(ac.dst) }} NM</span>

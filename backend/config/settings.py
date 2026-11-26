@@ -3,6 +3,8 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
+from monitor.exclusions import parse_list as parse_excluded_aircraft
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -133,6 +135,8 @@ INITIAL_CONFIG = {
     "query_radius_nm": env_number("QUERY_RADIUS_NM", 50.0),
     "telegram_bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
     "telegram_chat_id": os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
+    # Aeronaves que no generan alerta: códigos ICAO o matrículas separados por comas.
+    "excluded_aircraft": parse_excluded_aircraft(os.environ.get("EXCLUDED_AIRCRAFT", "")),
 }
 
 # Acceso de visitantes (entrar sin cuenta, solo para mirar el mapa). Es el

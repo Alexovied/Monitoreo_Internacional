@@ -10,6 +10,8 @@ su última posición es más vieja que ``max_age_s``.
 
 from dataclasses import dataclass, field
 
+from .exclusions import is_excluded
+
 # adsb.fi deja de informar lat/lon cuando la posición tiene más de 60 s.
 POSITION_MAX_AGE_S = 60.0
 
@@ -81,9 +83,12 @@ class AircraftState:
         self.aircraft.pop(hex_code, None)
         self.inside.pop(hex_code, None)
 
-    def payload(self):
-        """Lista de aeronaves para enviar al navegador."""
+    def payload(self, excluded_keys=frozenset()):
+        """Lista de aeronaves para enviar al navegador.
+
+        ``excluded`` marca las aeronaves que no generan alerta (ver ``exclusions``).
+        """
         return [
-            {**ac.to_dict(), "inside": hex_code in self.inside}
+            {**ac.to_dict(), "inside": hex_code in self.inside, "excluded": is_excluded(ac, excluded_keys)}
             for hex_code, ac in sorted(self.aircraft.items())
         ]

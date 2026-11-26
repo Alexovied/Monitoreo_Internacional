@@ -3,6 +3,7 @@ from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 
+from monitor import exclusions
 from monitor.adsbfi import MAX_RADIUS_NM as ADSBFI_MAX_RADIUS_NM
 
 # adsb.fi admite 1 consulta por segundo; 2 s deja margen para demoras y
@@ -29,6 +30,21 @@ telegram_chat_id_validator = RegexValidator(
     r"^-?\d+$",
     "El chat id debe ser numérico (los grupos tienen id negativo, p. ej. -1001234567890).",
 )
+
+
+def validate_excluded_aircraft(value):
+    """Devuelve el mensaje de error, o None si la lista es válida."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return "Tiene que ser una lista de códigos o matrículas."
+    if len(value) > exclusions.MAX_EXCLUDED:
+        return f"Como máximo {exclusions.MAX_EXCLUDED} aeronaves."
+    invalid = [item for item in value if item != exclusions.normalize(item) or not exclusions.is_valid(item)]
+    if invalid:
+        return (
+            f"No parece un código ICAO (6 caracteres, p. ej. E0B390) ni una matrícula (p. ej. PR-ABC): "
+            f"{', '.join(invalid)}"
+        )
+    return None
 
 
 class SystemConfig(models.Model):
@@ -79,6 +95,9 @@ class SystemConfig(models.Model):
         blank=True,
         validators=[telegram_chat_id_validator],
     )
+    # Aeronaves que no generan alerta (código ICAO hex o matrícula), p. ej. los
+    # aviones propios de un aeródromo. Se siguen viendo en el mapa.
+    excluded_aircraft = models.JSONField("aeronaves que no generan alerta", default=list, blank=True)
     # Aviso de mantenimiento para todos los usuarios; vacío = sin aviso.
     maintenance_message = models.CharField("aviso de mantenimiento", max_length=300, blank=True, default="")
     # Botón «Entrar como visitante» en el login. Solo vale si además el .env
@@ -130,6 +149,9 @@ class SystemConfig(models.Model):
         if bool(self.telegram_bot_token) != bool(self.telegram_chat_id):
             field = "telegram_chat_id" if self.telegram_bot_token else "telegram_bot_token"
             errors[field] = "El token y el chat id de Telegram se configuran juntos (o ambos vacíos)."
+        excluded_error = validate_excluded_aircraft(self.excluded_aircraft)
+        if excluded_error:
+            errors["excluded_aircraft"] = excluded_error
         if errors:
             raise ValidationError(errors)
 

@@ -94,6 +94,29 @@ class CycleTests(SimpleTestCase):
         self.assertEqual(delay, 5)
         self.assertTrue(any("ALERTA" in line for line in logs.output))
 
+    async def test_excluded_aircraft_do_not_alert(self):
+        # Uno por código ICAO (en minúsculas, como lo informa adsb.fi) y otro por matrícula sin guion.
+        self.config.excluded_aircraft = ["E0B390", "PRABC"]
+        own_by_hex = make_aircraft("e0b390", dst=1)
+        own_by_reg = make_aircraft("e48a1b", dst=1, flight=None, registration="PR-ABC")
+        foreign = make_aircraft("e01234", dst=1, flight="GLO1234", registration="PR-XYZ")
+        with self.assertLogs("monitor.service", "INFO") as logs:
+            await self.cycle(make_snapshot(own_by_hex, own_by_reg, foreign))
+        self.assertEqual([a["label"] for a in self.publisher.alerts], ["GLO1234"])
+        self.assertEqual([a["label"] for a in self.notifier.queued], ["GLO1234"])
+        self.assertEqual(sum("lista de aeronaves sin alerta" in line for line in logs.output), 2)
+        # Siguen en el mapa, dentro de la zona y marcadas.
+        sent = {ac["hex"]: ac for ac in self.publisher.updates[-1][0]}
+        self.assertEqual({h: (ac["inside"], ac["excluded"]) for h, ac in sent.items()},
+                         {"e0b390": (True, True), "e48a1b": (True, True), "e01234": (True, False)})
+        self.assertEqual(self.monitor.aircraft_payload(), self.publisher.updates[-1][0])
+
+    async def test_without_exclusions_everyone_alerts(self):
+        self.config.excluded_aircraft = []
+        await self.cycle(make_snapshot(make_aircraft(dst=1)))
+        self.assertEqual(len(self.publisher.alerts), 1)
+        self.assertFalse(self.publisher.updates[-1][0][0]["excluded"])
+
     async def test_query_follows_saved_config_each_cycle(self):
         await self.cycle(make_snapshot())
         self.config.zone_lat, self.config.zone_lon, self.config.query_radius_nm = -34.0, -58.0, 80.0

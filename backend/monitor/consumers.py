@@ -34,7 +34,7 @@ class AircraftConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(
             {
                 "type": "snapshot",
-                "aircraft": monitor.state.payload(),
+                "aircraft": monitor.aircraft_payload(),
                 "config": broadcast.public_config(config),
                 "status": monitor.status,
             }
