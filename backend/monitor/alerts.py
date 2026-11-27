@@ -114,8 +114,9 @@ def format_alert_message(alert):
         links.insert(0, f'<a href="{escape(ours, quote=True)}">Ver en nuestro mapa</a>')
 
     if alert.get("eta_min") is not None:
-        header = ("<b>POSIBLE INGRESO A ZONA DE ALERTA</b>\n"
-                  f"Entraría en ~{max(1, round(alert['eta_min']))} min si mantiene rumbo y velocidad")
+        # Distinto desde la primera palabra: es lo que muestra la vista previa de Telegram.
+        header = ("<b>PREAVISO: TODAVÍA NO ENTRÓ</b>\n"
+                  f"<i>Podría entrar en ~{max(1, round(alert['eta_min']))} min si mantiene rumbo y velocidad</i>")
     else:
         header = "<b>INGRESO A ZONA DE ALERTA</b>"
     return "\n".join([

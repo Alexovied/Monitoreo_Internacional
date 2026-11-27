@@ -165,7 +165,7 @@ class Monitor:
                 continue
             self._predicted[hex_code] = now
             alert = {**build_alert(aircraft, zone), "eta_min": minutes}
-            logger.info("POSIBLE INGRESO: %s entraría a %s en %.1f min.", alert["label"], zone.name, minutes)
+            logger.info("PREAVISO: %s entraría a %s en %.1f min.", alert["label"], zone.name, minutes)
             self.notifier.enqueue(alert, zone)
 
     async def _handle_failure(self, config, exc):

@@ -231,7 +231,8 @@ async def render_alert_map(alert, zone, *, client, cache=tile_cache):
     """Devuelve el JPEG del mapa para una alerta. Lanza ``MapImageError`` si falla."""
     if not isinstance(zone, Zone):
         raise MapImageError("Zona inválida.")
-    zoom = choose_zoom(zone.lat, zone.radius_nm * M_PER_NM)
+    # En un preaviso el avión está afuera: alejar el mapa hasta que entre.
+    zoom = choose_zoom(zone.lat, max(zone.radius_nm, alert.get("dst") or 0) * M_PER_NM)
     cx, cy = world_pixel(zone.lat, zone.lon, zoom)
     left, top = cx - WIDTH / 2, cy - HEIGHT / 2
     first_x, first_y = math.floor(left / TILE_SIZE), math.floor(top / TILE_SIZE)

@@ -129,7 +129,7 @@ class CycleTests(SimpleTestCase):
         self.assertEqual(len(self.notifier.queued), 1)
         self.assertAlmostEqual(self.notifier.queued[0]["eta_min"], 2.3, places=1)
         self.assertEqual(self.publisher.alerts, [])  # en la web suena solo el ingreso real
-        self.assertTrue(any("POSIBLE INGRESO" in line for line in logs.output))
+        self.assertTrue(any("PREAVISO" in line for line in logs.output))
         # Pasado el tiempo de espera se puede volver a avisar.
         later = NOW + service.PREDICTION_COOLDOWN_S + 10
         await self.cycle(make_snapshot(make_aircraft(now=later, **approaching), now=later))

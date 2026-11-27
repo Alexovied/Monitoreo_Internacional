@@ -47,8 +47,8 @@ class MessageTests(SimpleTestCase):
     def test_prediction_message(self):
         alert = {**build_alert(make_aircraft(dst=9), CNA), "eta_min": 2.3}
         text = format_alert_message(alert)
-        self.assertTrue(text.startswith("<b>POSIBLE INGRESO A ZONA DE ALERTA</b>\n"
-                                   "Entraría en ~2 min si mantiene rumbo y velocidad"))
+        self.assertTrue(text.startswith("<b>PREAVISO: TODAVÍA NO ENTRÓ</b>\n"
+                                   "<i>Podría entrar en ~2 min si mantiene rumbo y velocidad</i>"))
         self.assertIn('<a href="https://aviones.example/e0b390">Ver en nuestro mapa</a>', text)
         self.assertIn('<a href="https://www.flightradar24.com/ARG1309">Flightradar24</a>', text)
         # Va como pie de foto: Telegram corta en 1024 caracteres.
