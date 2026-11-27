@@ -170,7 +170,7 @@ const layout = computed(() => {
   const offscreen = []
   for (const t of targets.value) {
     const p = project(c, t.dir, w, h, focal.value)
-    if (p.visible) onscreen.push({ ...t, x: p.x, y: p.y, px: modelPx(t.dist), markerSize: modelPx(t.dist) * 0.7 })
+    if (p.visible) onscreen.push({ ...t, x: p.x, y: p.y, px: modelPx(t.dist / lift.value), markerSize: modelPx(t.dist / lift.value) * 0.7 })
     else offscreen.push({ t, p })
   }
   // Varias en la misma dirección: se reparten a lo largo del borde para que
