@@ -141,6 +141,17 @@ class CycleTests(SimpleTestCase):
         await self.cycle(make_snapshot(make_aircraft(**approaching)))
         self.assertEqual(self.notifier.queued, [])
 
+    async def test_payload_carries_entry_estimate_for_sky_mode(self):
+        # Modo cielo: la misma estimación del aviso anticipado viaja en cada aeronave.
+        self.config.predict_minutes = 0  # sin aviso por Telegram se usa el horizonte por defecto
+        approaching = dict(lat=-35.111944 + 10 / 60, lon=-58.726111, track=180.0, gs=120.0, dst=10)
+        leaving = dict(lat=-35.111944 + 10 / 60, lon=-58.726111, track=0.0, gs=120.0, dst=10)
+        await self.cycle(make_snapshot(make_aircraft("aaaaaa", **approaching), make_aircraft("bbbbbb", **leaving),
+                                       make_aircraft("cccccc", dst=1)))
+        sent = {ac["hex"]: ac["eta_min"] for ac in self.publisher.updates[-1][0]}
+        self.assertEqual(sent, {"aaaaaa": 2.3, "bbbbbb": None, "cccccc": None})  # cccccc ya está adentro
+        self.assertEqual(self.notifier.queued[0]["label"], "ARG1309")  # solo el ingreso real de cccccc
+
     async def test_query_follows_saved_config_each_cycle(self):
         await self.cycle(make_snapshot())
         self.config.zone_lat, self.config.zone_lon, self.config.query_radius_nm = -34.0, -58.0, 80.0

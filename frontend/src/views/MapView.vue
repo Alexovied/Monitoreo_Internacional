@@ -244,6 +244,16 @@ function positionAge(ac) {
           <i class="bi bi-box-arrow-up-right me-1"></i>Ver en Flightradar24
         </a>
       </div>
+      <RouterLink
+        v-if="live.config"
+        to="/cielo"
+        class="sky-fab btn btn-primary shadow position-absolute rounded-pill"
+        :class="{ 'has-card': selected }"
+        title="Apuntá el celular al cielo y mirá qué aeronave es cada una"
+        data-sky-link
+      >
+        <i class="bi bi-binoculars-fill me-1"></i>Modo cielo
+      </RouterLink>
       <span
         v-if="live.demo"
         class="position-absolute top-0 start-50 translate-middle-x mt-2 badge text-bg-warning fs-6 shadow"
@@ -451,6 +461,17 @@ function positionAge(ac) {
 }
 .map-legend summary {
   cursor: pointer;
+}
+/* Acceso al Modo cielo: abajo a la derecha, arriba de la atribución del mapa. */
+.sky-fab {
+  right: 0.75rem;
+  bottom: 2rem;
+  z-index: 1000;
+}
+@media (max-width: 991.98px) {
+  .sky-fab.has-card {
+    display: none; /* la ficha de la aeronave ocupa ese lugar */
+  }
 }
 .legend-tower {
   color: #fff;

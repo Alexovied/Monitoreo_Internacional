@@ -34,6 +34,7 @@ def public_config(config):
         "poll_interval_s": config.poll_interval_s,
         "query_radius_nm": config.query_radius_nm,
         "telegram_enabled": config.telegram_enabled,
+        "predict_minutes": getattr(config, "predict_minutes", 0),
         # Zona horaria del sistema (TZ del .env), para mostrar la hora local de la zona.
         "time_zone": settings.TIME_ZONE,
         "maintenance": config.maintenance_message,

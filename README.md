@@ -109,6 +109,24 @@ El aviso se genera **solo al entrar**: no se repite mientras la aeronave sigue a
 
 > El navegador solo permite sonido después de que el usuario hizo clic en la página. Si se recarga la página con la sesión ya iniciada, el sonido empieza a funcionar después del primer clic.
 
+### Modo cielo
+
+Desde el botón **Modo cielo** (abajo a la derecha del mapa, o en el menú) se abre una vista para el celular: se apunta al cielo y, sobre la imagen de la cámara trasera, aparece una etiqueta encima de cada aeronave con su identificación, altitud, distancia y estado:
+
+- **EN LA ZONA** (rojo): está dentro de la zona de alerta. Si es de la lista de aviones que no dan alerta, dice **EN LA ZONA · SIN ALERTA** (gris).
+- **Entra en ~N min** (amarillo): si sigue igual, entraría a la zona en esos minutos. Es la misma estimación del aviso anticipado (rumbo, velocidad y velocidad vertical en línea recta); el horizonte es el de **Aviso anticipado** en Configuración, o 10 minutos si está apagado.
+
+Las aeronaves que quedan fuera del cuadro se marcan con **flechas en el borde** que indican hacia dónde girar. Tocando una etiqueta se abre su ficha (tipo, velocidad, rumbo, dirección y elevación desde donde está el usuario) con un enlace al mapa. Abajo se ve el estado de la cámara, el GPS y la brújula; con el botón de ajustes se corrige el **campo de visión** de la cámara y la **brújula** si las etiquetas quedan corridas respecto de los aviones reales.
+
+Cómo funciona: con la posición del usuario (GPS) y la de cada aeronave se calcula el **azimut** (rumbo) y la **elevación** sobre el horizonte, descontando la curvatura de la Tierra. Con la orientación del celular (brújula y giroscopio, `DeviceOrientation`) se sabe hacia dónde mira la cámara, y cada aeronave se proyecta en la pantalla según el campo de visión. Las cuentas están en `frontend/src/sky.js` y la vista en `frontend/src/views/SkyView.vue`. No se graba ni se envía nada: la imagen de la cámara queda en el celular.
+
+- **Android (Chrome):** pide permiso de cámara y ubicación.
+- **iPhone (Safari):** además pide permiso de **movimiento y orientación**; se acepta en el cartel que aparece al tocar «Activar cámara y sensores».
+- Sin GPS se calcula desde el centro de la zona. Sin brújula (computadora, permiso negado) queda un **modo simulado**: se arrastra con el dedo o el mouse para mirar alrededor. También se abre directo con `/cielo?simulado=1` (útil para mostrarlo en un proyector).
+- Con `?demo=1` las aeronaves simuladas también aparecen en el Modo cielo.
+
+> **Requiere HTTPS.** Los navegadores solo dan acceso a la cámara, al GPS y a la brújula en páginas `https://` (o `localhost`). Entrando por `http://<ip>:5173` la vista avisa y ofrece solo el modo simulado. En la Raspberry Pi se usa la dirección HTTPS de Tailscale (`https://<equipo>.<tailnet>.ts.net…`); por ejemplo, con `tailscale serve --bg --https=8443 http://localhost:5173` Tailscale publica el frontend con certificado válido, y el WebSocket pasa por la misma dirección (`wss://`). El servidor de Vite ya acepta los nombres `*.ts.net` (`allowedHosts` en `vite.config.js`).
+
 ### Usuarios (administrador)
 
 Desde **Usuarios** se crean, editan y desactivan usuarios, y se cambia su rol o su contraseña.
@@ -414,11 +432,12 @@ Se usa **únicamente** la [API abierta de adsb.fi](https://github.com/adsbfi/ope
     └── src/
         ├── api.js, session.js, live.js     API, sesión y WebSocket
         ├── confirm.js                      Diálogo de confirmación
+        ├── sky.js                          Cuentas del Modo cielo (azimut, elevación, proyección)
         ├── components/AircraftMap.vue      Mapa Leaflet
         ├── components/AlertToasts.vue      Avisos en pantalla (toasts)
         ├── components/ConfirmDialog.vue    Modal de confirmación
         ├── components/FormField.vue        Campo de formulario con etiqueta, unidad y error
-        ├── views/                          Login, Mapa, Usuarios, Configuración
+        ├── views/                          Login, Mapa, Modo cielo, Usuarios, Configuración
         └── styles.css                      Los pocos estilos propios (el resto es Bootstrap)
 ```
 
@@ -456,7 +475,7 @@ Todas las rutas exigen sesión, salvo `csrf`, `login`, `guest` y `options`. Un v
 | `type` | Cuándo | Contenido |
 |---|---|---|
 | `snapshot` | Al conectarse. | `aircraft`, `config` (sin el token) y `status`. |
-| `aircraft` | En cada ciclo. | Lista completa de aeronaves (cada una con `inside`) y `status`. |
+| `aircraft` | En cada ciclo. | Lista completa de aeronaves (cada una con `inside`, `excluded` y `eta_min`: minutos estimados hasta entrar a la zona, o `null`) y `status`. |
 | `alert` | Una aeronave ingresó a la zona. | `alert`: identificación, altitud, velocidad, rumbo, distancia y hora. |
 | `config` | El administrador guardó cambios. | `config`. |
 

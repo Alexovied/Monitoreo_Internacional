@@ -30,6 +30,9 @@ UNEXPECTED_ERROR_DELAY_S = 30.0
 # Una aeronave avisada como "posible ingreso" no se vuelve a avisar hasta pasado
 # este tiempo (evita mensajes repetidos con aviones que dan vueltas cerca).
 PREDICTION_COOLDOWN_S = 15 * 60
+# Horizonte de la estimación de ingreso que va a los navegadores (Modo cielo)
+# cuando el aviso anticipado por Telegram está apagado (predict_minutes = 0).
+ETA_DEFAULT_HORIZON_MIN = 10
 
 
 def backoff_delay(poll_interval_s, failures, retry_after=None):
@@ -57,6 +60,8 @@ class Monitor:
         self._failures = 0
         self._excluded = frozenset()  # aeronaves que no generan alerta (claves de exclusions)
         self._predicted = {}  # hex -> hora (servidor) del último aviso de posible ingreso
+        self._zone = None  # zona del último ciclo, para estimar ingresos en el payload
+        self._eta_horizon_min = ETA_DEFAULT_HORIZON_MIN
         self._last_request_at = None
         self._server_clock = None  # (now del servidor, clock local) de la última respuesta
         self._loop = None
@@ -114,6 +119,8 @@ class Monitor:
         """Ejecuta un ciclo y devuelve cuántos segundos esperar hasta el próximo."""
         config = await self.load_config()
         zone = Zone.from_config(config)
+        self._zone = zone
+        self._eta_horizon_min = getattr(config, "predict_minutes", 0) or ETA_DEFAULT_HORIZON_MIN
         self._excluded = exclusions.excluded_keys(getattr(config, "excluded_aircraft", None))
         query = (config.zone_lat, config.zone_lon, config.query_radius_nm)
 
@@ -182,8 +189,20 @@ class Monitor:
         return delay
 
     def aircraft_payload(self):
-        """Aeronaves para los navegadores, con la marca de las que no generan alerta."""
-        return self.state.payload(self._excluded)
+        """Aeronaves para los navegadores, con la marca de las que no generan alerta.
+
+        ``eta_min``: minutos estimados hasta entrar a la zona (la misma cuenta del
+        aviso anticipado), o None si ya está adentro, se aleja o tarda más que el
+        horizonte. Lo usa el Modo cielo.
+        """
+        payload = self.state.payload(self._excluded)
+        for item in payload:
+            aircraft = self.state.aircraft.get(item["hex"])
+            eta = None
+            if self._zone is not None and aircraft is not None and not item["inside"]:
+                eta = self._zone.minutes_to_entry(aircraft, self._eta_horizon_min)
+            item["eta_min"] = round(eta, 1) if eta is not None else None
+        return payload
 
     def _log_incomplete(self, result):
         for hex_code, missing in result.newly_incomplete.items():

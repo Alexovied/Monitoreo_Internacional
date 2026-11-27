@@ -14,6 +14,12 @@ const router = createRouter({
     // alertas de Telegram). Los códigos de adsb.fi pueden empezar con "~".
     { path: '/:hex(~?[0-9a-fA-F]{6})?', name: 'map', component: MapView, meta: { title: 'Mapa' } },
     {
+      path: '/cielo',
+      name: 'sky',
+      component: () => import('./views/SkyView.vue'),
+      meta: { title: 'Modo cielo', fullscreen: true },
+    },
+    {
       path: '/usuarios',
       name: 'users',
       component: () => import('./views/UsersView.vue'),

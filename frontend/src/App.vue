@@ -78,6 +78,9 @@ async function onLogout() {
           <li class="nav-item">
             <RouterLink class="nav-link px-3 rounded" to="/"><i class="bi bi-map me-1"></i> Mapa</RouterLink>
           </li>
+          <li class="nav-item">
+            <RouterLink class="nav-link px-3 rounded" to="/cielo"><i class="bi bi-binoculars me-1"></i> Modo cielo</RouterLink>
+          </li>
           <template v-if="session.user.is_admin">
             <li class="nav-item">
               <RouterLink class="nav-link px-3 rounded" to="/usuarios"><i class="bi bi-people me-1"></i> Usuarios</RouterLink>

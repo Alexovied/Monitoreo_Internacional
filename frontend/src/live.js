@@ -79,8 +79,22 @@ function withDemo(aircraft) {
     seen_pos: 0,
     timestamp: now,
     inside: dst <= zone.radius_nm,
+    // Como el backend (eta_min): las que vienen derecho hacia la zona.
+    eta_min: demoEta(dst, bearing, gs, track, alt, zone),
   }))
   return [...aircraft, ...demo]
+}
+
+// Minutos hasta entrar a la zona si vuela derecho hacia el centro (±30°) y por
+// debajo del techo, o null.
+function demoEta(dst, bearing, gs, track, alt, zone) {
+  const radius = zone.radius_nm
+  if (dst <= radius || !gs || track === null || alt >= zone.ceiling_m / 0.3048) return null
+  const toCenter = (bearing + 180) % 360
+  const off = Math.abs(((track - toCenter + 540) % 360) - 180)
+  if (off > 30) return null
+  const minutes = ((dst - radius) / gs) * 60
+  return minutes <= 10 ? Math.round(minutes * 10) / 10 : null
 }
 
 export function setSound(enabled) {
