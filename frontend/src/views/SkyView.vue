@@ -11,6 +11,7 @@ import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, shallowRe
 import { useRouter } from 'vue-router'
 import { live } from '../live'
 import { SHAPES, shapeOf } from '../aircraftShapes'
+import { modelFileFor } from '../skyModels'
 import { altitude, dec1, heading as fmtHeading, flightradarUrl, identification, int, M_PER_FT, speed } from '../format'
 import {
   aircraftAltitudeM,
@@ -311,6 +312,30 @@ const zoneMarker = computed(() => {
 })
 
 const selected = computed(() => targets.value.find((t) => t.ac.hex === selectedHex.value) || null)
+
+// Foto real de la aeronave elegida (Planespotters.net, por su código ICAO). Sus
+// condiciones piden mostrar el nombre del fotógrafo y enlazar a la foto.
+const photo = ref(null)
+const photoCache = new Map()
+watch(selectedHex, async (hex) => {
+  photo.value = null
+  if (!hex || !/^[0-9a-f]{6}$/i.test(hex)) return
+  if (!photoCache.has(hex)) {
+    photoCache.set(
+      hex,
+      fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          const p = data?.photos?.[0]
+          const src = p?.thumbnail_large?.src || p?.thumbnail?.src
+          return src ? { src, link: p.link, photographer: p.photographer } : null
+        })
+        .catch(() => null),
+    )
+  }
+  const result = await photoCache.get(hex)
+  if (selectedHex.value === hex) photo.value = result
+})
 const visibleCount = computed(() => layout.value.labels.length)
 
 // --- textos ------------------------------------------------------------------
@@ -472,6 +497,7 @@ function render3d(time) {
   const items = layout.value.labels.map((t) => ({
     hex: t.ac.hex,
     shape: shapeOf(t.ac),
+    file: modelFileFor(t.ac),
     status: t.status,
     dir: t.dir,
     track: t.ac.track ?? t.ac.true_heading ?? 0,
@@ -725,6 +751,10 @@ onBeforeUnmount(() => {
         <span v-if="chip(selected)" class="badge" :class="chip(selected).cls">{{ chip(selected).text }}</span>
         <button type="button" class="btn-close btn-close-white ms-auto" aria-label="Cerrar ficha" @click="selectedHex = null"></button>
       </div>
+      <a v-if="photo" :href="photo.link" target="_blank" rel="noopener noreferrer" class="sky-photo d-block mt-2" data-sky-photo>
+        <img :src="photo.src" :alt="`Foto de ${shortName(selected.ac)}`" />
+        <span>Foto: © {{ photo.photographer }} · Planespotters.net</span>
+      </a>
       <div class="d-flex flex-wrap column-gap-3 small mt-1">
         <span><span class="opacity-75">Tipo</span> {{ SHAPES[shapeOf(selected.ac)].label }}</span>
         <span><span class="opacity-75">Altitud</span> <b>{{ altitude(selected.ac.alt_baro) }}</b></span>
@@ -885,6 +915,28 @@ onBeforeUnmount(() => {
 }
 .sky-marker.ring::after {
   display: none;
+}
+.sky-photo {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  color: #fff;
+  text-decoration: none;
+}
+.sky-photo img {
+  display: block;
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+}
+.sky-photo span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 6px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.55);
 }
 .sky-far {
   top: calc(max(10px, env(safe-area-inset-top)) + 52px);

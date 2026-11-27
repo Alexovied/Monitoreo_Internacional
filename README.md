@@ -116,11 +116,11 @@ Desde el botón **Modo cielo** (abajo a la derecha del mapa, o en el menú) se a
 - **EN LA ZONA** (rojo): está dentro de la zona de alerta. Si es de la lista de aviones que no dan alerta, dice **EN LA ZONA · SIN ALERTA** (gris).
 - **Entra en ~N min** (amarillo): si sigue igual, entraría a la zona en esos minutos. Es la misma estimación del aviso anticipado (rumbo, velocidad y velocidad vertical en línea recta); el horizonte es el de **Aviso anticipado** en Configuración, o 10 minutos si está apagado.
 
-Cada aeronave se dibuja como un **modelo 3D** (avión, avioneta, planeador, helicóptero, dron o globo, según su categoría ADS-B) orientado con su rumbo y su ascenso reales, así que se la ve de frente, de costado o desde abajo según desde dónde se la mire. Las etiquetas muestran también la **elevación** (↑ grados sobre el horizonte), y en la imagen hay arcos cada 15° para leerla.
+Cada aeronave se dibuja con un **modelo 3D real** de su tipo (A320, 737, Embraer, ATR, Dash 8, CRJ, 787, 777, 747, Citation, Piper, planeador ASK 21, helicóptero, dron o globo; se elige por el código de tipo ICAO y, si no está en la lista, por la categoría ADS-B), orientado con su rumbo y su ascenso reales, así que se la ve de frente, de costado o desde abajo según desde dónde se la mire. Las etiquetas muestran también la **elevación** (↑ grados sobre el horizonte), y en la imagen hay arcos cada 15° para leerla.
 
 **Lejos de la zona.** Si el GPS dice que el usuario está más allá del área de cobertura (más 30 km), los aviones están a cientos de km y, por la curvatura de la Tierra, quedarían pegados al horizonte aunque vuelen muy alto. En ese caso la vista se calcula **desde el centro de la zona** (con la brújula del celular) y lo avisa; con «Usar mi ubicación» se vuelve a la posición real.
 
-Las aeronaves que quedan fuera del cuadro se marcan con **flechas en el borde** que indican hacia dónde girar. Tocando una etiqueta se abre su ficha (tipo, velocidad, rumbo, dirección y elevación desde donde está el usuario) con un enlace al mapa. Abajo se ve el estado de la cámara, el GPS y la brújula; con el botón de ajustes se corrige el **campo de visión** de la cámara y la **brújula** si las etiquetas quedan corridas respecto de los aviones reales.
+Las aeronaves que quedan fuera del cuadro se marcan con **flechas en el borde** que indican hacia dónde girar. Tocando una etiqueta se abre su ficha (tipo, velocidad, rumbo, dirección y elevación desde donde está el usuario), con una **foto real** de esa aeronave si [Planespotters.net](https://www.planespotters.net/) tiene una (con el crédito del fotógrafo), y un enlace al mapa. Abajo se ve el estado de la cámara, el GPS y la brújula; con el botón de ajustes se corrige el **campo de visión** de la cámara y la **brújula** si las etiquetas quedan corridas respecto de los aviones reales.
 
 Cómo funciona: con la posición del usuario (GPS) y la de cada aeronave se calcula el **azimut** (rumbo) y la **elevación** sobre el horizonte, descontando la curvatura de la Tierra. Con la orientación del celular (brújula y giroscopio, `DeviceOrientation`) se sabe hacia dónde mira la cámara, y cada aeronave se proyecta en la pantalla según el campo de visión. Las cuentas están en `frontend/src/sky.js`, el render 3D (three.js) en `frontend/src/skyScene.js` y la vista en `frontend/src/views/SkyView.vue`. No se graba ni se envía nada: la imagen de la cámara queda en el celular.
 
@@ -438,6 +438,7 @@ Se usa **únicamente** la [API abierta de adsb.fi](https://github.com/adsbfi/ope
         ├── confirm.js                      Diálogo de confirmación
         ├── sky.js                          Cuentas del Modo cielo (azimut, elevación, proyección)
         ├── skyScene.js                     Modelos 3D del Modo cielo (three.js)
+        ├── skyModels.js                    Qué modelo 3D se usa para cada tipo de aeronave
         ├── components/AircraftMap.vue      Mapa Leaflet
         ├── components/AlertToasts.vue      Avisos en pantalla (toasts)
         ├── components/ConfirmDialog.vue    Modal de confirmación
@@ -520,4 +521,5 @@ Conexiones rechazadas: sin sesión, usuario desactivado u origen no permitido. A
 - **Mapas:** © [colaboradores de OpenStreetMap](https://www.openstreetmap.org/copyright). La capa de terreno es © [OpenTopoMap](https://opentopomap.org) (CC-BY-SA), con datos SRTM. Las atribuciones se muestran en el mapa web y en la imagen que se envía por Telegram, como exigen sus condiciones.
 - Biblioteca de mapas: [Leaflet](https://leafletjs.com).
 - Interfaz: [Bootstrap](https://getbootstrap.com/) y [Bootstrap Icons](https://icons.getbootstrap.com/) (licencia MIT).
-- Modelos 3D del Modo cielo: [three.js](https://threejs.org/) (licencia MIT).
+- Modelos 3D del Modo cielo: [three.js](https://threejs.org/) (licencia MIT). Los aviones son de [Flightradar24/fr24-3d-models](https://github.com/Flightradar24/fr24-3d-models) (de FlightGear, GPL-2.0) y el dron y el globo de [CesiumJS](https://github.com/CesiumGS/cesium) (Apache-2.0); detalle en `frontend/public/models/LICENCIAS.md`.
+- Fotos de aeronaves en el Modo cielo: [Planespotters.net](https://www.planespotters.net/), con el nombre del fotógrafo y enlace a la foto.

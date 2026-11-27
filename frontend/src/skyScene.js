@@ -11,7 +11,9 @@
 
 import {
   AmbientLight,
+  Box3,
   BoxGeometry,
+  Color,
   ConeGeometry,
   CylinderGeometry,
   DirectionalLight,
@@ -25,6 +27,9 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
+
 
 const RENDER_DIST = 100 // unidades a las que se ubica cada modelo
 const RAD = Math.PI / 180
@@ -193,6 +198,77 @@ function balloon(status) {
 
 const BUILDERS = { jet, light, glider, heli, drone, balloon }
 
+// --- Modelos reales (.glb en public/models) ------------------------------------
+//
+// Se cargan una sola vez cada uno, la primera vez que hace falta. Mientras
+// tanto (o si falla la descarga) se usa el modelo simple de arriba.
+
+const loader = new GLTFLoader()
+loader.setMeshoptDecoder(MeshoptDecoder)
+const gltfCache = new Map() // archivo -> { promise, model }
+
+// Los modelos vienen con Y arriba y la nariz hacia +Z (convención glTF). Acá el
+// mundo tiene Z arriba y la nariz debe mirar a +Y: se gira y se lleva el
+// largo total a 1 unidad, centrado.
+function normalize(scene, file) {
+  const inner = new Group()
+  inner.add(scene)
+  scene.updateMatrixWorld(true)
+  const bbox = new Box3().setFromObject(scene)
+  const center = bbox.getCenter(new Vector3())
+  const size = bbox.getSize(new Vector3())
+  scene.position.sub(center)
+  const outer = new Group()
+  inner.rotation.x = Math.PI / 2 // Y arriba -> Z arriba (y +Z pasa a -Y)
+  if (!NOSE_MINUS_Z.has(file)) inner.rotation.z = Math.PI // nariz a +Y
+  inner.scale.setScalar(1 / Math.max(size.x, size.y, size.z))
+  outer.add(inner)
+  return outer
+}
+// Modelos que ya traen la nariz hacia -Z.
+const NOSE_MINUS_Z = new Set(['drone.glb', 'balloon.glb'])
+
+function loadModel(file) {
+  let entry = gltfCache.get(file)
+  if (!entry) {
+    entry = { model: null, failed: false }
+    entry.promise = loader
+      .loadAsync(`${import.meta.env.BASE_URL}models/${file}`)
+      .then((gltf) => {
+        entry.model = normalize(gltf.scene, file)
+      })
+      .catch((err) => {
+        entry.failed = true
+        console.warn(`Modo cielo: no se pudo cargar ${file}`, err)
+      })
+    gltfCache.set(file, entry)
+  }
+  return entry
+}
+
+// Copia del modelo real teñida según el estado (rojo en la zona, amarillo si
+// va a entrar, gris si no da alerta). Normal: sus colores originales.
+const TINT = { inside: 0xff2030, eta: 0xffb000, quiet: 0x6c757d }
+function instance(model, status) {
+  const copy = model.clone(true)
+  if (TINT[status]) {
+    copy.traverse((o) => {
+      if (!o.isMesh) return
+      const tint = (m) => {
+        const c = m.clone()
+        if (c.color) c.color.lerp(new Color(TINT[status]), 0.75)
+        if (c.emissive) {
+          c.emissive.set(TINT[status])
+          c.emissiveIntensity = 0.35
+        }
+        return c
+      }
+      o.material = Array.isArray(o.material) ? o.material.map(tint) : tint(o.material)
+    })
+  }
+  return copy
+}
+
 export class SkyScene {
   constructor(canvas) {
     this.renderer = new WebGLRenderer({ canvas, alpha: true, antialias: true })
@@ -231,12 +307,15 @@ export class SkyScene {
     const seen = new Set()
     for (const it of items) {
       seen.add(it.hex)
-      const key = `${it.shape}-${it.status}`
+      const file = it.file
+      const real = file ? loadModel(file) : null
+      const useReal = !!real?.model
+      const key = `${useReal ? file : it.shape}-${it.status}`
       let entry = this.models.get(it.hex)
       if (!entry || entry.key !== key) {
         if (entry) this.scene.remove(entry.group)
         const group = new Group()
-        group.add((BUILDERS[it.shape] || jet)(it.status))
+        group.add(useReal ? instance(real.model, it.status) : (BUILDERS[it.shape] || jet)(it.status))
         entry = { group, key }
         this.models.set(it.hex, entry)
         this.scene.add(group)
