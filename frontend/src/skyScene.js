@@ -219,6 +219,7 @@ function normalize(scene, file) {
   const size = bbox.getSize(new Vector3())
   scene.position.sub(center)
   const outer = new Group()
+  inner.rotation.order = 'ZXY' // primero el giro en X y después el de Z (con XYZ quedaban panza arriba y de cola)
   inner.rotation.x = Math.PI / 2 // Y arriba -> Z arriba (y +Z pasa a -Y)
   if (!NOSE_MINUS_Z.has(file)) inner.rotation.z = Math.PI // nariz a +Y
   inner.scale.setScalar(1 / Math.max(size.x, size.y, size.z))
