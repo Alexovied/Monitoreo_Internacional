@@ -132,6 +132,19 @@ export function project(cam, dir, width, height, focal) {
   return { visible: x >= 0 && x <= width && y >= 0 && y <= height, x, y, angle, behind: false }
 }
 
+// Hacia dónde apunta la nariz de la aeronave en pantalla (grados, 0 = arriba,
+// horario): se proyecta un punto 1 km adelante sobre su rumbo. null si no hay
+// rumbo o queda detrás de la cámara.
+export function noseAngle(cam, dist, azimuth, elevation, track, width, height, focal) {
+  if (typeof track !== 'number') return null
+  const [az, tr] = [azimuth * RAD, track * RAD]
+  const p = [dist * Math.sin(az), dist * Math.cos(az), dist * Math.tan(elevation * RAD)]
+  const a = project(cam, p, width, height, focal)
+  const b = project(cam, add(p, [1000 * Math.sin(tr), 1000 * Math.cos(tr), 0]), width, height, focal)
+  if (a.behind || b.behind) return null
+  return Math.atan2(b.x - a.x, a.y - b.y) / RAD
+}
+
 // Punto del borde de la pantalla en la dirección `angle`, dejando `marginX` a
 // los costados y `marginY` arriba y abajo (barras de la interfaz).
 export function edgePoint(angle, width, height, marginX, marginY = marginX) {

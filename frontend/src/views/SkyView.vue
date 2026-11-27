@@ -24,6 +24,7 @@ import {
   edgePoint,
   focalForCover,
   lookAngles,
+  noseAngle,
   norm360,
   project,
   rotateCameraYaw,
@@ -143,7 +144,10 @@ const layout = computed(() => {
   const offscreen = []
   for (const t of targets.value) {
     const p = project(c, t.dir, w, h, focal.value)
-    if (p.visible) onscreen.push({ ...t, x: p.x, y: p.y, markerSize: Math.max(14, Math.min(34, 34 - t.dist / 2500)) })
+    if (p.visible) {
+      const nose = SHAPES[shapeOf(t.ac)].fixed ? null : noseAngle(c, t.dist, t.azimuth, t.elevation, t.ac.track, w, h, focal.value)
+      onscreen.push({ ...t, x: p.x, y: p.y, nose, markerSize: Math.max(22, Math.min(48, 48 - t.dist / 1500)) })
+    }
     else offscreen.push({ t, p })
   }
   // Varias en la misma dirección: se reparten a lo largo del borde para que
@@ -270,7 +274,14 @@ function shortName(ac) {
 
 function altShort(alt) {
   if (alt === 'ground') return 'en tierra'
-  return typeof alt === 'number' ? `${int(alt)} ft · ${int(alt * M_PER_FT)} m` : 'sin altitud'
+  return typeof alt === 'number' ? `${int(alt * M_PER_FT)} m` : 'sin altitud'
+}
+
+// Ángulo sobre el horizonte, para saber cuánto levantar el celular.
+function elevShort(t) {
+  if (t.ac.alt_baro === 'ground') return ''
+  const e = Math.round(t.elevation)
+  return ` · ${e >= 0 ? '↑' : '↓'}${Math.abs(e)}°`
 }
 
 function etaText(min) {
@@ -510,7 +521,14 @@ onBeforeUnmount(() => {
       :key="`m-${t.ac.hex}`"
       class="sky-marker"
       :class="t.status"
-      :style="{ left: `${t.x}px`, top: `${t.y}px`, width: `${t.markerSize}px`, height: `${t.markerSize}px` }"
+      :style="{
+        left: `${t.x}px`,
+        top: `${t.y}px`,
+        width: `${t.markerSize}px`,
+        height: `${t.markerSize}px`,
+        transform: `translate(-50%, -50%) rotate(${t.nose ?? 0}deg)`,
+      }"
+      v-html="SHAPES[shapeOf(t.ac)].svg"
     ></div>
     <button
       v-for="t in layout.labels"
@@ -527,7 +545,7 @@ onBeforeUnmount(() => {
         <b class="text-truncate">{{ shortName(t.ac) }}</b>
         <span class="ms-auto opacity-75 small">{{ km(t.dist) }}</span>
       </span>
-      <span class="d-block small mt-1 lh-1 opacity-75">{{ altShort(t.ac.alt_baro) }}</span>
+      <span class="d-block small mt-1 lh-1 opacity-75">{{ altShort(t.ac.alt_baro) }}{{ elevShort(t) }}</span>
       <span v-if="chip(t)" class="badge mt-1" :class="chip(t).cls">{{ chip(t).text }}</span>
     </button>
 
@@ -759,42 +777,31 @@ onBeforeUnmount(() => {
   stroke: #ffc107;
 }
 
-/* Punto sobre la aeronave: anillo con mira. */
+/* Silueta de la aeronave, girada hacia donde vuela. */
 .sky-marker {
   position: absolute;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), inset 0 0 0 2px rgba(0, 0, 0, 0.25);
+  color: #fff;
+  filter: drop-shadow(0 0 1px #000) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
   pointer-events: none;
 }
-.sky-marker::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 4px;
-  height: 4px;
-  margin: -2px 0 0 -2px;
-  border-radius: 50%;
-  background: currentColor;
+.sky-marker :deep(svg) {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 .sky-marker.inside {
-  border-color: #ff4d5e;
   color: #ff4d5e;
   animation: pulse 1.2s ease-in-out infinite;
 }
 .sky-marker.eta {
-  border-color: #ffc107;
   color: #ffc107;
 }
 .sky-marker.quiet {
-  border-color: #adb5bd;
   color: #adb5bd;
 }
 @keyframes pulse {
   50% {
-    box-shadow: 0 0 0 8px rgba(255, 77, 94, 0.35);
+    opacity: 0.55;
   }
 }
 
