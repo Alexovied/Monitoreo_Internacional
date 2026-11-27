@@ -35,9 +35,14 @@ export function aircraftAltitudeM(alt, observerAltM = 0) {
 
 // Azimut (grados desde el norte) y elevación (grados sobre el horizonte) de un
 // punto a `dist` metros y `heightM` de altitud, visto desde `observerAltM`.
-export function lookAngles(dist, bearing, heightM, observerAltM = 0) {
+//
+// `lift` > 1 "acerca" el cielo: la elevación se calcula como si la aeronave
+// estuviera `lift` veces más cerca (misma dirección, misma altitud), así las que
+// en la realidad quedan pegadas al horizonte se ven arriba. Solo para la vista
+// desde el centro de la zona, donde no hay un avión real con el que coincidir.
+export function lookAngles(dist, bearing, heightM, observerAltM = 0, lift = 1) {
   const drop = (dist * dist) / (2 * EFFECTIVE_R) // lo que "baja" por la curvatura
-  const elevation = Math.atan2(heightM - observerAltM - drop, Math.max(dist, 1)) / RAD
+  const elevation = Math.atan2(heightM - observerAltM - drop, Math.max(dist / lift, 1)) / RAD
   return { azimuth: bearing, elevation }
 }
 

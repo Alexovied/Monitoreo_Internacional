@@ -37,6 +37,9 @@ const DEFAULT_FOV = 66 // grados que abarca el lado largo de la cámara principa
 const MAX_ARROWS = 8
 const ARROW_GAP = 76 // separación entre flechas (círculo + texto)
 const LABEL_W = 168
+// Vista desde el centro de la zona: cuánto se "acerca" el cielo para que los
+// aviones se vean arriba y no pegados al horizonte (1 = ángulos reales).
+const DEFAULT_LIFT = 4
 const FAR_MARGIN_M = 30000 // más allá del área de cobertura + esto, se considera "lejos"
 const LABEL_H = 64 // con la línea de estado (en la zona / entra en…)
 const LABEL_H_SHORT = 44
@@ -50,9 +53,9 @@ const settings = reactive(loadSettings())
 function loadSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
-    return { fov: Number(saved.fov) || DEFAULT_FOV, offset: Number(saved.offset) || 0 }
+    return { fov: Number(saved.fov) || DEFAULT_FOV, offset: Number(saved.offset) || 0, lift: Number(saved.lift) || DEFAULT_LIFT }
   } catch {
-    return { fov: DEFAULT_FOV, offset: 0 }
+    return { fov: DEFAULT_FOV, offset: 0, lift: DEFAULT_LIFT }
   }
 }
 watch(settings, () => {
@@ -114,6 +117,9 @@ const observer = computed(() => {
   const z = live.config?.zone
   return z ? { lat: z.lat, lon: z.lon, alt: 0, source: 'zone' } : null
 })
+// Con tu ubicación real los ángulos son los reales (para que la etiqueta caiga
+// sobre el avión); desde el centro de la zona se levanta el cielo.
+const lift = computed(() => (observer.value?.source === 'zone' ? settings.lift : 1))
 
 // --- cuentas por aeronave ------------------------------------------------------
 
@@ -126,7 +132,7 @@ const targets = computed(() => {
       const heightM = aircraftAltitudeM(ac.alt_baro, obs.alt)
       if (heightM === null) return null
       const { dist, bearing } = distanceBearing(obs.lat, obs.lon, ac.lat, ac.lon)
-      const { azimuth, elevation } = lookAngles(dist, bearing, heightM, obs.alt)
+      const { azimuth, elevation } = lookAngles(dist, bearing, heightM, obs.alt, lift.value)
       return { ac, dist, azimuth, elevation, dir: direction(azimuth, elevation), status: statusOf(ac) }
     })
     .filter(Boolean)
@@ -719,6 +725,7 @@ onBeforeUnmount(() => {
         <i class="bi bi-geo-fill text-warning me-1"></i>
         Estás a <b>{{ km(zoneDistM) }}</b> de la zona: desde acá esos aviones no se ven (quedan detrás del horizonte).
         Te mostramos el cielo <b>como si estuvieras en el centro de la zona</b>, con tu brújula.
+        <template v-if="lift > 1">Los aviones se dibujan más arriba que en la realidad (cielo ×{{ lift }}, se cambia en ajustes).</template>
         <button type="button" class="btn btn-link btn-sm text-light p-0 ms-1 align-baseline" @click="forceOwnPosition = true">Usar mi ubicación</button>
       </template>
       <template v-else>
@@ -738,8 +745,16 @@ onBeforeUnmount(() => {
         Corrección de brújula: <b>{{ settings.offset > 0 ? '+' : '' }}{{ settings.offset }}°</b>
       </label>
       <input id="sky-offset" v-model.number="settings.offset" type="range" class="form-range" min="-45" max="45" step="1" />
-      <div class="form-text text-light opacity-75">Si un avión que ves queda corrido, movelo hasta que coincida.</div>
-      <button type="button" class="btn btn-outline-light btn-sm mt-2" @click="Object.assign(settings, { fov: DEFAULT_FOV, offset: 0 })">
+      <div class="form-text text-light opacity-75 mb-2">Si un avión que ves queda corrido, movelo hasta que coincida.</div>
+      <label class="form-label small mb-1" for="sky-lift">
+        Levantar el cielo: <b>{{ settings.lift === 1 ? 'real' : `×${settings.lift}` }}</b>
+      </label>
+      <input id="sky-lift" v-model.number="settings.lift" type="range" class="form-range" min="1" max="8" step="1" :disabled="lift === 1 && settings.lift !== 1" />
+      <div class="form-text text-light opacity-75">
+        Solo en la vista desde el centro de la zona: sube los aviones para verlos arriba y no contra el horizonte. Con tu
+        ubicación real siempre se usan los ángulos reales.
+      </div>
+      <button type="button" class="btn btn-outline-light btn-sm mt-2" @click="Object.assign(settings, { fov: DEFAULT_FOV, offset: 0, lift: DEFAULT_LIFT })">
         Restablecer
       </button>
     </div>
@@ -763,7 +778,7 @@ onBeforeUnmount(() => {
         <span>
           <span class="opacity-75">Está a</span> <b>{{ km(selected.dist) }}</b> hacia el {{ cardinal(selected.azimuth) }}
           ({{ int(selected.azimuth) }}°), {{ int(Math.abs(selected.elevation)) }}°
-          {{ selected.elevation >= 0 ? 'sobre' : 'bajo' }} el horizonte
+          {{ selected.elevation >= 0 ? 'sobre' : 'bajo' }} el horizonte<template v-if="lift > 1"> (cielo ×{{ lift }})</template>
         </span>
       </div>
       <div class="d-flex gap-2 mt-2">
