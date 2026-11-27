@@ -16,6 +16,9 @@ MIN_POLL_INTERVAL_S = 2
 MIN_TEMP_ALERT_C = 40
 MAX_TEMP_ALERT_C = 95
 
+# Más allá de esto la estimación en línea recta deja de servir.
+MAX_PREDICT_MINUTES = 30
+
 
 def validate_positive(value):
     if value is None or value <= 0:
@@ -98,6 +101,13 @@ class SystemConfig(models.Model):
     # Aeronaves que no generan alerta (código ICAO hex o matrícula), p. ej. los
     # aviones propios de un aeródromo. Se siguen viendo en el mapa.
     excluded_aircraft = models.JSONField("aeronaves que no generan alerta", default=list, blank=True)
+    # Aviso por Telegram de "posible ingreso": aeronaves que, con su rumbo y
+    # velocidad actuales, entrarían a la zona dentro de estos minutos. 0 = apagado.
+    predict_minutes = models.PositiveSmallIntegerField(
+        "aviso de posible ingreso (min)",
+        default=5,
+        validators=[MaxValueValidator(MAX_PREDICT_MINUTES)],
+    )
     # Aviso de mantenimiento para todos los usuarios; vacío = sin aviso.
     maintenance_message = models.CharField("aviso de mantenimiento", max_length=300, blank=True, default="")
     # Botón «Entrar como visitante» en el login. Solo vale si además el .env

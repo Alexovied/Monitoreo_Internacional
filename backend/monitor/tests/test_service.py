@@ -117,6 +117,30 @@ class CycleTests(SimpleTestCase):
         self.assertEqual(len(self.publisher.alerts), 1)
         self.assertFalse(self.publisher.updates[-1][0][0]["excluded"])
 
+    async def test_predicted_entry_warns_once_by_telegram_only(self):
+        self.config.predict_minutes = 5
+        # 10 NM al norte del centro, hacia el sur a 120 kt: entraría en 2,3 min.
+        approaching = dict(lat=-35.111944 + 10 / 60, lon=-58.726111, track=180.0, gs=120.0, dst=10)
+        own = make_aircraft("e48a1b", registration="PR-ABC", **approaching)
+        self.config.excluded_aircraft = ["PR-ABC"]
+        with self.assertLogs("monitor.service", "INFO") as logs:
+            await self.cycle(make_snapshot(make_aircraft(**approaching), own))
+            await self.cycle(make_snapshot(make_aircraft(now=NOW + 5, **approaching), now=NOW + 5))
+        self.assertEqual(len(self.notifier.queued), 1)
+        self.assertAlmostEqual(self.notifier.queued[0]["eta_min"], 2.3, places=1)
+        self.assertEqual(self.publisher.alerts, [])  # en la web suena solo el ingreso real
+        self.assertTrue(any("POSIBLE INGRESO" in line for line in logs.output))
+        # Pasado el tiempo de espera se puede volver a avisar.
+        later = NOW + service.PREDICTION_COOLDOWN_S + 10
+        await self.cycle(make_snapshot(make_aircraft(now=later, **approaching), now=later))
+        self.assertEqual(len(self.notifier.queued), 2)
+
+    async def test_prediction_off(self):
+        self.config.predict_minutes = 0
+        approaching = dict(lat=-35.111944 + 10 / 60, lon=-58.726111, track=180.0, gs=120.0, dst=10)
+        await self.cycle(make_snapshot(make_aircraft(**approaching)))
+        self.assertEqual(self.notifier.queued, [])
+
     async def test_query_follows_saved_config_each_cycle(self):
         await self.cycle(make_snapshot())
         self.config.zone_lat, self.config.zone_lon, self.config.query_radius_nm = -34.0, -58.0, 80.0

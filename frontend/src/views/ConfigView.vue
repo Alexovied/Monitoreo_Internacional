@@ -10,10 +10,18 @@ const MAX_RADIUS_NM = 250
 const MIN_POLL_S = 2 // igual que MIN_POLL_INTERVAL_S del backend
 const MIN_TEMP_C = 40 // igual que MIN_TEMP_ALERT_C y MAX_TEMP_ALERT_C del backend
 const MAX_TEMP_C = 95
+const MAX_PREDICT_MIN = 30 // igual que MAX_PREDICT_MINUTES del backend
 const FIELDS = [
   'zone_name', 'zone_lat', 'zone_lon', 'zone_radius_nm', 'zone_floor_m', 'zone_ceiling_m',
   'poll_interval_s', 'query_radius_nm', 'telegram_chat_id', 'guest_access',
-  'temp_alert_enabled', 'temp_alert_threshold_c',
+  'temp_alert_enabled', 'temp_alert_threshold_c', 'predict_minutes',
+]
+// Secciones de la página; cada campo con error marca su sección.
+const SECTIONS = [
+  { key: 'zona', label: 'Zona', icon: 'bi-bullseye', fields: ['zone_', 'poll_interval_s', 'query_radius_nm'] },
+  { key: 'alertas', label: 'Alertas', icon: 'bi-bell', fields: ['predict_minutes', 'excluded_aircraft'] },
+  { key: 'telegram', label: 'Telegram', icon: 'bi-telegram', fields: ['telegram_'] },
+  { key: 'sistema', label: 'Sistema', icon: 'bi-hdd', fields: ['guest_access', 'temp_alert_'] },
 ]
 const NOTICE_STYLE = {
   ok: { cls: 'alert-success', icon: 'bi-check-circle-fill' },
@@ -33,6 +41,14 @@ const loading = ref(true)
 const saving = ref(false)
 const testing = ref(false)
 const fileInput = ref(null)
+// La sección abierta queda en la dirección (#alertas) para volver a ella al recargar.
+const section = ref(SECTIONS.some((s) => `#${s.key}` === location.hash) ? location.hash.slice(1) : 'zona')
+watch(section, (key) => history.replaceState(history.state, '', `#${key}`))
+const sectionHasError = (s) => Object.keys(errors.value || {}).some((f) => errors.value[f] && s.fields.some((p) => f.startsWith(p)))
+function showFirstError() {
+  const first = SECTIONS.find(sectionHasError)
+  if (first) section.value = first.key
+}
 
 const dirty = computed(
   () =>
@@ -96,6 +112,8 @@ function validate() {
   if (!(Number.isInteger(poll) && poll >= MIN_POLL_S)) e.poll_interval_s = `Un número entero, de ${MIN_POLL_S} segundos o más.`
   const tempLimit = num(form.temp_alert_threshold_c)
   if (!(tempLimit >= MIN_TEMP_C && tempLimit <= MAX_TEMP_C)) e.temp_alert_threshold_c = `Entre ${MIN_TEMP_C} y ${MAX_TEMP_C} °C.`
+  const predict = num(form.predict_minutes)
+  if (!(Number.isInteger(predict) && predict >= 0 && predict <= MAX_PREDICT_MIN)) e.predict_minutes = `Un número entero entre 0 y ${MAX_PREDICT_MIN}.`
   if (!(query > 0 && query <= MAX_RADIUS_NM)) e.query_radius_nm = `Entre 0 y ${MAX_RADIUS_NM} NM.`
   else if (radius > 0 && query < radius) e.query_radius_nm = 'Tiene que ser igual o mayor que el radio de la zona.'
 
@@ -130,6 +148,7 @@ function payload() {
     guest_access: !!form.guest_access,
     temp_alert_enabled: !!form.temp_alert_enabled,
     temp_alert_threshold_c: num(form.temp_alert_threshold_c),
+    predict_minutes: num(form.predict_minutes),
   }
   body.excluded_aircraft = [...excluded.value]
   if (token.value.trim()) body.telegram_bot_token = token.value.trim()
@@ -145,6 +164,7 @@ async function send(body, okText) {
     notice.value = { kind: 'ok', text: okText }
   } catch (err) {
     errors.value = err.fieldErrors
+    showFirstError()
     notice.value = { kind: 'error', text: Object.keys(err.fieldErrors).length ? 'Hay datos para corregir: están marcados en rojo.' : err.message }
   } finally {
     saving.value = false
@@ -155,6 +175,7 @@ async function save() {
   notice.value = null
   if (!validate()) {
     notice.value = { kind: 'error', text: 'Hay datos para corregir: están marcados en rojo.' }
+    showFirstError()
     return
   }
   await send(payload(), 'Listo, se guardó. El mapa y las alertas ya usan los datos nuevos.')
@@ -265,6 +286,7 @@ async function loadOpenAir(event) {
     const zone = await api('/config/openair/', { method: 'POST', form: data })
     Object.assign(form, zone)
     errors.value = {}
+    section.value = 'zona'
     notice.value = {
       kind: 'info',
       text: `Se cargó la zona «${zone.zone_name}» del archivo ${file.name}. Todavía no se guardó: revisala y tocá «Guardar».`,
@@ -344,6 +366,26 @@ onMounted(load)
         <span>{{ notice.text }}</span>
       </div>
 
+      <nav class="section-nav mb-3" aria-label="Secciones de la configuración">
+        <ul class="nav nav-pills flex-nowrap gap-1 p-1 bg-body-tertiary rounded-3" role="tablist">
+          <li v-for="s in SECTIONS" :key="s.key" class="nav-item flex-fill" role="presentation">
+            <button
+              type="button"
+              role="tab"
+              class="nav-link w-100 text-nowrap position-relative"
+              :class="{ active: section === s.key }"
+              :aria-selected="section === s.key"
+              :data-tab="s.key"
+              @click="section = s.key"
+            >
+              <i class="bi me-sm-1" :class="s.icon"></i><span class="tab-label">{{ s.label }}</span>
+              <span v-if="sectionHasError(s)" class="error-dot" title="Hay datos para corregir"></span>
+            </button>
+          </li>
+        </ul>
+      </nav>
+
+      <div v-show="section === 'zona'">
       <!-- Zona -->
       <section class="card shadow-sm mb-3" data-section="zone">
         <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
@@ -394,6 +436,41 @@ onMounted(load)
             <FormField id="query_radius_nm" v-model="form.query_radius_nm" class="col-md-6" label="Distancia de búsqueda"
               icon="bi-circle" type="number" step="any" min="0" :max="MAX_RADIUS_NM" unit="NM"
               :hint="`Unos ${km(form.query_radius_nm)} km. Es también lo que abarca el mapa. Máximo ${MAX_RADIUS_NM} NM.`" :error="errors.query_radius_nm" />
+          </div>
+        </div>
+      </section>
+
+      </div>
+
+      <div v-show="section === 'alertas'">
+      <!-- Aviso anticipado -->
+      <section class="card shadow-sm mb-3" data-section="predict">
+        <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
+          <div>
+            <h2 class="h5 mb-0"><i class="bi bi-hourglass-split text-warning me-2"></i>Aviso anticipado</h2>
+            <div class="small text-body-secondary">
+              Manda a Telegram un «posible ingreso» cuando un avión, si sigue con el mismo rumbo y velocidad, va a entrar
+              en la zona dentro de estos minutos. Es una estimación: si el avión gira, puede que al final no entre.
+            </div>
+          </div>
+          <span class="badge" :class="saved.predict_minutes ? 'text-bg-success' : 'text-bg-secondary'">
+            <i class="bi me-1" :class="saved.predict_minutes ? 'bi-check-circle' : 'bi-dash-circle'"></i>
+            {{ saved.predict_minutes ? 'Activado' : 'Desactivado' }}
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="row g-3 align-items-start">
+            <FormField id="predict_minutes" v-model="form.predict_minutes" class="col-md-6" label="Avisar con"
+              icon="bi-stopwatch" type="number" step="1" min="0" :max="MAX_PREDICT_MIN" unit="min antes"
+              :hint="`0 = no avisar antes. Recomendado: 5. Máximo ${MAX_PREDICT_MIN}. Cada avión se avisa una vez cada 15 min.`"
+              :error="errors.predict_minutes" />
+            <div class="col-md-6 small text-body-secondary mt-md-4">
+              <i class="bi bi-info-circle me-1"></i>Los aviones de la lista de abajo tampoco generan este aviso. En la web
+              no suena: suena recién cuando el avión entra.
+              <div v-if="!saved.telegram_enabled" class="text-warning-emphasis mt-2">
+                <i class="bi bi-exclamation-triangle me-1"></i>Primero conectá Telegram: sin eso el aviso no llega.
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -462,6 +539,9 @@ onMounted(load)
         </div>
       </section>
 
+      </div>
+
+      <div v-show="section === 'telegram'">
       <!-- Telegram -->
       <section class="card shadow-sm mb-3" data-section="telegram">
         <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
@@ -551,6 +631,9 @@ onMounted(load)
         </div>
       </section>
 
+      </div>
+
+      <div v-show="section === 'sistema'">
       <!-- Visitantes -->
       <section class="card shadow-sm mb-3" data-section="guest">
         <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
@@ -695,6 +778,8 @@ onMounted(load)
         </div>
       </section>
 
+      </div>
+
       <div class="save-bar card shadow d-flex flex-row flex-wrap align-items-center gap-2 px-3 py-2">
         <span class="me-auto small" :class="dirty ? 'text-warning-emphasis fw-semibold' : 'text-body-secondary'">
           <i class="bi me-1" :class="dirty ? 'bi-pencil-fill' : 'bi-check2'"></i>
@@ -723,6 +808,27 @@ onMounted(load)
 .btn-close-sm {
   font-size: 0.6rem;
 }
+.section-nav {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 11;
+}
+.section-nav ul {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.section-nav .nav-link:not(.active) {
+  color: var(--bs-body-color);
+}
+.error-dot {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--bs-danger);
+}
 .save-bar {
   position: sticky;
   bottom: 0.75rem;
@@ -735,6 +841,17 @@ onMounted(load)
   }
   .save-bar .btn {
     flex: 1;
+  }
+  /* Las 4 secciones entran a lo ancho: ícono arriba y nombre chico abajo. */
+  .section-nav .nav-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.35rem 0.25rem;
+    font-size: 0.8rem;
+  }
+  .section-nav .nav-link .bi {
+    font-size: 1.1rem;
   }
 }
 </style>

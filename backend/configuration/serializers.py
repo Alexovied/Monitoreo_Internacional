@@ -37,7 +37,7 @@ class SystemConfigSerializer(serializers.ModelSerializer):
             "telegram_bot_token", "telegram_bot_token_masked", "telegram_chat_id", "telegram_enabled",
             "guest_access", "guest_access_allowed", "guest_access_enabled",
             "temp_alert_enabled", "temp_alert_threshold_c",
-            "excluded_aircraft", "maintenance_message", "updated_at",
+            "excluded_aircraft", "predict_minutes", "maintenance_message", "updated_at",
         ]
         # El aviso se cambia solo con /config/maintenance/ (puede avisar por Telegram).
         read_only_fields = ["maintenance_message", "updated_at"]

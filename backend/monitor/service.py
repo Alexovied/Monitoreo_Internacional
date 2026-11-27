@@ -27,6 +27,9 @@ MAX_BACKOFF_S = 300.0
 # (adsb.fi admite como máximo una por segundo).
 MIN_REQUEST_GAP_S = 2.0
 UNEXPECTED_ERROR_DELAY_S = 30.0
+# Una aeronave avisada como "posible ingreso" no se vuelve a avisar hasta pasado
+# este tiempo (evita mensajes repetidos con aviones que dan vueltas cerca).
+PREDICTION_COOLDOWN_S = 15 * 60
 
 
 def backoff_delay(poll_interval_s, failures, retry_after=None):
@@ -53,6 +56,7 @@ class Monitor:
         self.status = {"ok": None, "error": None, "last_update": None, "failures": 0}
         self._failures = 0
         self._excluded = frozenset()  # aeronaves que no generan alerta (claves de exclusions)
+        self._predicted = {}  # hex -> hora (servidor) del último aviso de posible ingreso
         self._last_request_at = None
         self._server_clock = None  # (now del servidor, clock local) de la última respuesta
         self._loop = None
@@ -142,9 +146,27 @@ class Monitor:
             await self.publisher.send_alert(alert)
         for hex_code in result.exited:
             logger.info("%s salió de la zona.", hex_code)
+        self._predict(getattr(config, "predict_minutes", 0), zone, snapshot.now)
 
         await self.publisher.send_aircraft(self.aircraft_payload(), self.status)
         return config.poll_interval_s
+
+    def _predict(self, horizon_min, zone, now):
+        """Avisa por Telegram de las aeronaves que entrarían a la zona en menos de ``horizon_min``."""
+        self._predicted = {h: t for h, t in self._predicted.items() if now - t < PREDICTION_COOLDOWN_S}
+        if not horizon_min:
+            return
+        for hex_code, aircraft in self.state.aircraft.items():
+            if (hex_code in self.state.inside or hex_code in self._predicted
+                    or exclusions.is_excluded(aircraft, self._excluded)):
+                continue
+            minutes = zone.minutes_to_entry(aircraft, horizon_min)
+            if minutes is None:
+                continue
+            self._predicted[hex_code] = now
+            alert = {**build_alert(aircraft, zone), "eta_min": minutes}
+            logger.info("POSIBLE INGRESO: %s entraría a %s en %.1f min.", alert["label"], zone.name, minutes)
+            self.notifier.enqueue(alert, zone)
 
     async def _handle_failure(self, config, exc):
         self._failures += 1

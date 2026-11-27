@@ -59,3 +59,26 @@ class ContainsTests(SimpleTestCase):
         cfg = SimpleNamespace(zone_name="Z", zone_lat=1.0, zone_lon=2.0, zone_radius_nm=3.0,
                               zone_floor_m=0.0, zone_ceiling_m=500.0)
         self.assertEqual(Zone.from_config(cfg), Zone("Z", 1.0, 2.0, 3.0, 0.0, 500.0))
+
+
+class PredictionTests(SimpleTestCase):
+    def north_of_center(self, nm=10.0, track=180.0, gs=120.0, alt=3000, baro_rate=None):
+        return SimpleNamespace(lat=CNA.lat + nm / 60, lon=CNA.lon, gs=gs, track=track, alt_baro=alt,
+                               baro_rate=baro_rate)
+
+    def test_heading_to_the_zone(self):
+        # 10 NM al norte, hacia el sur a 120 kt (2 NM/min): llega al borde (5,4 NM) en 2,3 min.
+        self.assertAlmostEqual(CNA.minutes_to_entry(self.north_of_center(), 5), 2.3, places=2)
+
+    def test_not_entering(self):
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(track=0), 5))  # se aleja
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(track=90), 5))  # pasa de largo
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(), 2))  # más allá del horizonte
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(nm=3), 5))  # ya adentro
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(gs=None), 5))
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(alt="ground"), 5))
+
+    def test_altitude_at_entry(self):
+        high = dict(alt=16000)  # por encima del techo (14.436 ft)
+        self.assertIsNone(CNA.minutes_to_entry(self.north_of_center(**high), 5))
+        self.assertIsNotNone(CNA.minutes_to_entry(self.north_of_center(**high, baro_rate=-1500), 5))

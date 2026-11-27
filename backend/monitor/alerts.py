@@ -113,8 +113,13 @@ def format_alert_message(alert):
     if ours:
         links.insert(0, f'<a href="{escape(ours, quote=True)}">Ver en nuestro mapa</a>')
 
+    if alert.get("eta_min") is not None:
+        header = ("<b>POSIBLE INGRESO A ZONA DE ALERTA</b>\n"
+                  f"Entraría en ~{max(1, round(alert['eta_min']))} min si mantiene rumbo y velocidad")
+    else:
+        header = "<b>INGRESO A ZONA DE ALERTA</b>"
     return "\n".join([
-        "<b>INGRESO A ZONA DE ALERTA</b>",
+        header,
         f"Zona: {escape(str(alert['zone']))}",
         "",
         f"<b>{title}</b>" + (f"\n<i>{details}</i>" if details else ""),

@@ -20,6 +20,7 @@ https://github.com/wiedehopf/readsb/blob/dev/README-json.md
       gs        velocidad respecto al suelo, en nudos
       track     rumbo verdadero sobre el suelo, en grados
       true_heading  proa verdadera; en tierra suele venir en lugar de track
+      baro_rate velocidad vertical barométrica, en pies por minuto
       dst      distancia al punto consultado, en NM
       seen_pos  segundos transcurridos desde la última posición, antes de ``now``
 """
@@ -67,6 +68,7 @@ class Aircraft:
     timestamp: float  # hora de la posición, en segundos Unix (now - seen_pos)
     # Categoría ADS-B del emisor: A1 liviana, A2 chica, A3+ mediana/grande, A7 helicóptero.
     category: str | None = None
+    baro_rate: float | None = None  # pies por minuto (+ sube, - baja)
 
     @property
     def label(self):
@@ -159,6 +161,7 @@ def parse_aircraft(raw, now):
             seen_pos=values["seen_pos"],
             timestamp=now - values["seen_pos"],
             category=_text(raw.get("category")),
+            baro_rate=_number(raw.get("baro_rate")),
         ),
         (),
     )

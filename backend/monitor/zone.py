@@ -5,6 +5,7 @@ distancia horizontal es directamente ``dst`` (NM). Las alturas de la zona se
 configuran en metros y ``alt_baro`` llega en pies: se compara en pies.
 """
 
+import math
 from dataclasses import asdict, dataclass
 
 METERS_PER_FOOT = 0.3048
@@ -70,6 +71,34 @@ class Zone:
         if not self.is_surface and not alt >= self.floor_ft:
             return False
         return True
+
+    def minutes_to_entry(self, aircraft, horizon_min):
+        """Minutos hasta que la aeronave entre al cilindro si sigue igual, o None.
+
+        Estima en línea recta con el rumbo (``track``) y la velocidad (``gs``)
+        actuales, y la altitud con la velocidad vertical (``baro_rate``) si la
+        hay. Solo para aeronaves que todavía están afuera en horizontal.
+        """
+        gs, track, alt = aircraft.gs, aircraft.track, aircraft.alt_baro
+        if not gs or track is None or isinstance(alt, bool) or not isinstance(alt, (int, float)):
+            return None
+        # shortcut: plano local (equirectangular), basta para radios de hasta 250 NM.
+        x = (aircraft.lon - self.lon) * 60 * math.cos(math.radians(self.lat))
+        y = (aircraft.lat - self.lat) * 60
+        vx = gs / 60 * math.sin(math.radians(track))  # NM por minuto
+        vy = gs / 60 * math.cos(math.radians(track))
+        # |p + v·t| = radio  →  a·t² + b·t + c = 0
+        a, b, c = vx * vx + vy * vy, 2 * (x * vx + y * vy), x * x + y * y - self.radius_nm ** 2
+        disc = b * b - 4 * a * c
+        if c <= 0 or b >= 0 or disc < 0:
+            return None  # ya adentro, alejándose o pasa de largo
+        t = (-b - math.sqrt(disc)) / (2 * a)
+        if t > horizon_min:
+            return None
+        alt_then = alt + (aircraft.baro_rate or 0) * t
+        if not alt_then < self.ceiling_ft or (not self.is_surface and not alt_then >= self.floor_ft):
+            return None
+        return t
 
     def to_dict(self):
         return asdict(self)
