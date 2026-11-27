@@ -521,6 +521,9 @@ function positionAge(ac) {
 }
 .ac-list-head {
   overflow: hidden;
+  /* Sin esto, con overflow: hidden el navegador lo deja achicar a cero cuando
+     el panel no alcanza y la fila de encabezados queda cortada. */
+  flex-shrink: 0;
 }
 /* Los créditos no necesitan el tamaño del resto del panel. */
 .credits {
