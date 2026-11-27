@@ -207,7 +207,7 @@ const loader = new GLTFLoader()
 loader.setMeshoptDecoder(MeshoptDecoder)
 const gltfCache = new Map() // archivo -> { promise, model }
 
-// Los modelos vienen con Y arriba y la nariz hacia +Z (convención glTF). Acá el
+// Los modelos vienen con Y arriba y la nariz hacia -Z. Acá el
 // mundo tiene Z arriba y la nariz debe mirar a +Y: se gira y se lleva el
 // largo total a 1 unidad, centrado.
 function normalize(scene, file) {
@@ -219,14 +219,18 @@ function normalize(scene, file) {
   const size = bbox.getSize(new Vector3())
   scene.position.sub(center)
   const outer = new Group()
+  // Primero el giro en X y después el de Z (orden de Euler 'ZYX' = Rz·Ry·Rx).
+  // Con el orden por defecto ('XYZ') el giro en Z se aplicaba antes y el
+  // avión quedaba cabeza abajo.
+  inner.rotation.order = 'ZYX'
   inner.rotation.x = Math.PI / 2 // Y arriba -> Z arriba (y +Z pasa a -Y)
-  if (!NOSE_MINUS_Z.has(file)) inner.rotation.z = Math.PI // nariz a +Y
+  if (NOSE_PLUS_Z.has(file)) inner.rotation.z = Math.PI // nariz a +Y
   inner.scale.setScalar(1 / Math.max(size.x, size.y, size.z))
   outer.add(inner)
   return outer
 }
-// Modelos que ya traen la nariz hacia -Z.
-const NOSE_MINUS_Z = new Set(['drone.glb', 'balloon.glb'])
+// Casi todos traen la nariz hacia -Z (queda en +Y tras el giro). Excepciones:
+const NOSE_PLUS_Z = new Set([])
 
 function loadModel(file) {
   let entry = gltfCache.get(file)
