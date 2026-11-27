@@ -116,9 +116,13 @@ Desde el botón **Modo cielo** (abajo a la derecha del mapa, o en el menú) se a
 - **EN LA ZONA** (rojo): está dentro de la zona de alerta. Si es de la lista de aviones que no dan alerta, dice **EN LA ZONA · SIN ALERTA** (gris).
 - **Entra en ~N min** (amarillo): si sigue igual, entraría a la zona en esos minutos. Es la misma estimación del aviso anticipado (rumbo, velocidad y velocidad vertical en línea recta); el horizonte es el de **Aviso anticipado** en Configuración, o 10 minutos si está apagado.
 
+Cada aeronave se dibuja como un **modelo 3D** (avión, avioneta, planeador, helicóptero, dron o globo, según su categoría ADS-B) orientado con su rumbo y su ascenso reales, así que se la ve de frente, de costado o desde abajo según desde dónde se la mire. Las etiquetas muestran también la **elevación** (↑ grados sobre el horizonte), y en la imagen hay arcos cada 15° para leerla.
+
+**Lejos de la zona.** Si el GPS dice que el usuario está más allá del área de cobertura (más 30 km), los aviones están a cientos de km y, por la curvatura de la Tierra, quedarían pegados al horizonte aunque vuelen muy alto. En ese caso la vista se calcula **desde el centro de la zona** (con la brújula del celular) y lo avisa; con «Usar mi ubicación» se vuelve a la posición real.
+
 Las aeronaves que quedan fuera del cuadro se marcan con **flechas en el borde** que indican hacia dónde girar. Tocando una etiqueta se abre su ficha (tipo, velocidad, rumbo, dirección y elevación desde donde está el usuario) con un enlace al mapa. Abajo se ve el estado de la cámara, el GPS y la brújula; con el botón de ajustes se corrige el **campo de visión** de la cámara y la **brújula** si las etiquetas quedan corridas respecto de los aviones reales.
 
-Cómo funciona: con la posición del usuario (GPS) y la de cada aeronave se calcula el **azimut** (rumbo) y la **elevación** sobre el horizonte, descontando la curvatura de la Tierra. Con la orientación del celular (brújula y giroscopio, `DeviceOrientation`) se sabe hacia dónde mira la cámara, y cada aeronave se proyecta en la pantalla según el campo de visión. Las cuentas están en `frontend/src/sky.js` y la vista en `frontend/src/views/SkyView.vue`. No se graba ni se envía nada: la imagen de la cámara queda en el celular.
+Cómo funciona: con la posición del usuario (GPS) y la de cada aeronave se calcula el **azimut** (rumbo) y la **elevación** sobre el horizonte, descontando la curvatura de la Tierra. Con la orientación del celular (brújula y giroscopio, `DeviceOrientation`) se sabe hacia dónde mira la cámara, y cada aeronave se proyecta en la pantalla según el campo de visión. Las cuentas están en `frontend/src/sky.js`, el render 3D (three.js) en `frontend/src/skyScene.js` y la vista en `frontend/src/views/SkyView.vue`. No se graba ni se envía nada: la imagen de la cámara queda en el celular.
 
 - **Android (Chrome):** pide permiso de cámara y ubicación.
 - **iPhone (Safari):** además pide permiso de **movimiento y orientación**; se acepta en el cartel que aparece al tocar «Activar cámara y sensores».
@@ -433,6 +437,7 @@ Se usa **únicamente** la [API abierta de adsb.fi](https://github.com/adsbfi/ope
         ├── api.js, session.js, live.js     API, sesión y WebSocket
         ├── confirm.js                      Diálogo de confirmación
         ├── sky.js                          Cuentas del Modo cielo (azimut, elevación, proyección)
+        ├── skyScene.js                     Modelos 3D del Modo cielo (three.js)
         ├── components/AircraftMap.vue      Mapa Leaflet
         ├── components/AlertToasts.vue      Avisos en pantalla (toasts)
         ├── components/ConfirmDialog.vue    Modal de confirmación
@@ -515,3 +520,4 @@ Conexiones rechazadas: sin sesión, usuario desactivado u origen no permitido. A
 - **Mapas:** © [colaboradores de OpenStreetMap](https://www.openstreetmap.org/copyright). La capa de terreno es © [OpenTopoMap](https://opentopomap.org) (CC-BY-SA), con datos SRTM. Las atribuciones se muestran en el mapa web y en la imagen que se envía por Telegram, como exigen sus condiciones.
 - Biblioteca de mapas: [Leaflet](https://leafletjs.com).
 - Interfaz: [Bootstrap](https://getbootstrap.com/) y [Bootstrap Icons](https://icons.getbootstrap.com/) (licencia MIT).
+- Modelos 3D del Modo cielo: [three.js](https://threejs.org/) (licencia MIT).

@@ -7,7 +7,7 @@
 // Usa la cámara trasera (getUserMedia), el GPS (geolocation) y la brújula y
 // el giroscopio (DeviceOrientation). Los tres necesitan HTTPS. Sin sensores
 // (computadora, permiso negado) queda un modo simulado: se arrastra para mirar.
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { live } from '../live'
 import { SHAPES, shapeOf } from '../aircraftShapes'
@@ -24,7 +24,6 @@ import {
   edgePoint,
   focalForCover,
   lookAngles,
-  noseAngle,
   norm360,
   project,
   rotateCameraYaw,
@@ -37,6 +36,7 @@ const DEFAULT_FOV = 66 // grados que abarca el lado largo de la cámara principa
 const MAX_ARROWS = 8
 const ARROW_GAP = 76 // separación entre flechas (círculo + texto)
 const LABEL_W = 168
+const FAR_MARGIN_M = 30000 // más allá del área de cobertura + esto, se considera "lejos"
 const LABEL_H = 64 // con la línea de estado (en la zona / entra en…)
 const LABEL_H_SHORT = 44
 
@@ -68,6 +68,8 @@ const started = ref(false)
 const showSettings = ref(false)
 const selectedHex = ref(null)
 const videoRef = ref(null)
+const canvasRef = ref(null)
+const scene3d = shallowRef(null) // SkyScene, si el navegador tiene WebGL
 const rootRef = ref(null)
 
 const cameraState = ref('off') // off | starting | on | denied | unavailable
@@ -89,8 +91,25 @@ let sensorTimer = null
 let iosOffset = null // iOS: alpha es relativo; webkitCompassHeading da el norte
 
 // Posición del usuario: GPS, o el centro de la zona mientras no hay GPS.
+// Lejos de la zona (p. ej. en Argentina mirando el sistema de Brasil) los
+// aviones están a cientos de km: quedan pegados al horizonte o debajo, por la
+// curvatura de la Tierra. En ese caso se mira "como si estuviera" en el centro
+// de la zona, salvo que el usuario elija su ubicación real.
+const zoneDistM = computed(() => {
+  const z = live.config?.zone
+  if (gps.state !== 'on' || !z) return null
+  return distanceBearing(gps.lat, gps.lon, z.lat, z.lon).dist
+})
+const farFromZone = computed(() => {
+  const cfg = live.config
+  if (zoneDistM.value === null || !cfg) return false
+  return zoneDistM.value > (cfg.query_radius_nm || 50) * 1852 + FAR_MARGIN_M
+})
+const forceOwnPosition = ref(false)
+const virtual = computed(() => farFromZone.value && !forceOwnPosition.value)
+
 const observer = computed(() => {
-  if (gps.state === 'on') return { lat: gps.lat, lon: gps.lon, alt: gps.alt ?? 0, source: 'gps' }
+  if (gps.state === 'on' && !virtual.value) return { lat: gps.lat, lon: gps.lon, alt: gps.alt ?? 0, source: 'gps' }
   const z = live.config?.zone
   return z ? { lat: z.lat, lon: z.lon, alt: 0, source: 'zone' } : null
 })
@@ -144,10 +163,7 @@ const layout = computed(() => {
   const offscreen = []
   for (const t of targets.value) {
     const p = project(c, t.dir, w, h, focal.value)
-    if (p.visible) {
-      const nose = SHAPES[shapeOf(t.ac)].fixed ? null : noseAngle(c, t.dist, t.azimuth, t.elevation, t.ac.track, w, h, focal.value)
-      onscreen.push({ ...t, x: p.x, y: p.y, nose, markerSize: Math.max(22, Math.min(48, 48 - t.dist / 1500)) })
-    }
+    if (p.visible) onscreen.push({ ...t, x: p.x, y: p.y, px: modelPx(t.dist), markerSize: modelPx(t.dist) * 0.7 })
     else offscreen.push({ t, p })
   }
   // Varias en la misma dirección: se reparten a lo largo del borde para que
@@ -221,9 +237,45 @@ const layout = computed(() => {
     const ex = Math.min(Math.max(t.x, lx), lx + LABEL_W)
     const ey = Math.min(Math.max(t.y, ly), ly + lh)
     const far = Math.hypot(ex - t.x, ey - t.y) > gap + 4
-    labels.push({ ...t, lx, ly, lh, leader: far ? { x2: ex, y2: ey } : null })
+    // La línea arranca en el borde del modelo, no en su centro.
+    const len = Math.hypot(ex - t.x, ey - t.y) || 1
+    const k = Math.min(t.markerSize * 0.55, len) / len
+    const leader = far ? { x1: t.x + (ex - t.x) * k, y1: t.y + (ey - t.y) * k, x2: ex, y2: ey } : null
+    labels.push({ ...t, lx, ly, lh, leader })
   }
   return { labels, arrows, hiddenArrows: Math.max(0, offscreen.length - MAX_ARROWS) }
+})
+
+// Tamaño en pantalla del modelo 3D: más cerca, más grande.
+function modelPx(dist) {
+  return Math.max(38, Math.min(110, 110 - dist / 350))
+}
+
+// Ascenso o descenso en grados (velocidad vertical en ft/min sobre la horizontal).
+const RAD_DEG = Math.PI / 180
+function climbDeg(ac) {
+  if (!ac.gs || !ac.baro_rate) return 0
+  return Math.max(-20, Math.min(20, Math.atan2(ac.baro_rate, ac.gs * 101.27) / RAD_DEG))
+}
+
+// Escalera de elevación: arcos cada 15° alrededor de donde mira la cámara, con
+// los grados, para leer a qué altura del cielo está cada avión.
+const ladder = computed(() => {
+  const c = viewCam.value
+  if (!c || !look.value) return []
+  const out = []
+  for (const el of [15, 30, 45, 60, 75]) {
+    let path = ''
+    let label = null
+    for (let d = -30; d <= 30; d += 3) {
+      const p = project(c, direction(look.value.heading + d, el), size.w, size.h, focal.value)
+      if (p.behind) continue
+      path += `${path ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`
+      if (d === -12 && p.visible) label = { x: p.x, y: p.y }
+    }
+    if (path) out.push({ el, path, label })
+  }
+  return out
 })
 
 // Horizonte y marcas de brújula (cada 15°, con letras cada 45°).
@@ -274,14 +326,7 @@ function shortName(ac) {
 
 function altShort(alt) {
   if (alt === 'ground') return 'en tierra'
-  return typeof alt === 'number' ? `${int(alt * M_PER_FT)} m` : 'sin altitud'
-}
-
-// Ángulo sobre el horizonte, para saber cuánto levantar el celular.
-function elevShort(t) {
-  if (t.ac.alt_baro === 'ground') return ''
-  const e = Math.round(t.elevation)
-  return ` · ${e >= 0 ? '↑' : '↓'}${Math.abs(e)}°`
+  return typeof alt === 'number' ? `${int(alt)} ft · ${int(alt * M_PER_FT)} m` : 'sin altitud'
 }
 
 function etaText(min) {
@@ -413,11 +458,39 @@ function onOrientation(e) {
 
 const angleDiff = (a, b) => ((a - b + 540) % 360) - 180
 
-function loop() {
+function loop(time = 0) {
   rafId = requestAnimationFrame(loop)
   if (!targetCam) return
   // Con sensores se suaviza; en simulado se sigue el arrastre tal cual.
   cam.value = simulated.value ? targetCam : blendCamera(cam.value, targetCam, 0.25)
+  render3d(time)
+}
+
+function render3d(time) {
+  const sc = scene3d.value
+  if (!sc || !viewCam.value) return
+  const items = layout.value.labels.map((t) => ({
+    hex: t.ac.hex,
+    shape: shapeOf(t.ac),
+    status: t.status,
+    dir: t.dir,
+    track: t.ac.track ?? t.ac.true_heading ?? 0,
+    climbDeg: climbDeg(t.ac),
+    px: t.px,
+  }))
+  sc.render(viewCam.value, focal.value, items, time)
+}
+
+async function init3d() {
+  try {
+    const { SkyScene } = await import('../skyScene')
+    if (!canvasRef.value) return
+    const sc = new SkyScene(canvasRef.value)
+    sc.setSize(size.w, size.h)
+    scene3d.value = markRaw(sc)
+  } catch (err) {
+    console.warn('Modo cielo sin 3D (WebGL no disponible):', err)
+  }
 }
 
 // Modo simulado: arrastrar para mirar alrededor.
@@ -461,18 +534,21 @@ function close() {
 function onResize() {
   size.w = rootRef.value?.clientWidth || window.innerWidth
   size.h = rootRef.value?.clientHeight || window.innerHeight
+  scene3d.value?.setSize(size.w, size.h)
 }
 
 onMounted(() => {
   onResize()
   window.addEventListener('resize', onResize)
   screen.orientation?.addEventListener?.('change', onResize)
+  init3d()
   // ?simulado=1 abre directo el modo simulado (para mostrar en una computadora).
   if (new URLSearchParams(location.search).has('simulado')) start({ simulate: true })
 })
 
 onBeforeUnmount(() => {
   started.value = false
+  scene3d.value?.dispose()
   cancelAnimationFrame(rafId)
   clearTimeout(sensorTimer)
   window.removeEventListener('resize', onResize)
@@ -497,6 +573,10 @@ onBeforeUnmount(() => {
 
     <!-- Horizonte, marcas de brújula y centro de la zona -->
     <svg v-if="cam" class="sky-overlay" :width="size.w" :height="size.h" aria-hidden="true">
+      <g v-for="l in ladder" :key="`el-${l.el}`">
+        <path :d="l.path" class="ladder" />
+        <text v-if="l.label" :x="l.label.x" :y="l.label.y - 4" class="ladder-label">{{ l.el }}°</text>
+      </g>
       <path :d="horizon.path" class="horizon" />
       <g v-for="t in horizon.ticks" :key="t.az">
         <line :x1="t.x" :y1="t.y - (t.major ? 10 : 6)" :x2="t.x" :y2="t.y + (t.major ? 10 : 6)" class="tick" />
@@ -509,26 +589,23 @@ onBeforeUnmount(() => {
       </g>
     </svg>
 
+    <!-- Modelos 3D de las aeronaves (three.js) -->
+    <canvas ref="canvasRef" class="sky-3d" :style="{ width: `${size.w}px`, height: `${size.h}px` }"></canvas>
+
     <!-- Aeronaves en cuadro: líneas, puntos y etiquetas (en ese orden, para que
          las etiquetas queden siempre arriba) -->
     <svg class="sky-leader" :width="size.w" :height="size.h" aria-hidden="true">
       <template v-for="t in layout.labels" :key="t.ac.hex">
-        <line v-if="t.leader" :x1="t.x" :y1="t.y" :x2="t.leader.x2" :y2="t.leader.y2" :class="t.status" />
+        <line v-if="t.leader" :x1="t.leader.x1" :y1="t.leader.y1" :x2="t.leader.x2" :y2="t.leader.y2" :class="t.status" />
       </template>
     </svg>
     <div
       v-for="t in layout.labels"
       :key="`m-${t.ac.hex}`"
+      v-show="!scene3d || t.status === 'inside'"
       class="sky-marker"
-      :class="t.status"
-      :style="{
-        left: `${t.x}px`,
-        top: `${t.y}px`,
-        width: `${t.markerSize}px`,
-        height: `${t.markerSize}px`,
-        transform: `translate(-50%, -50%) rotate(${t.nose ?? 0}deg)`,
-      }"
-      v-html="SHAPES[shapeOf(t.ac)].svg"
+      :class="[t.status, { ring: scene3d }]"
+      :style="{ left: `${t.x}px`, top: `${t.y}px`, width: `${t.markerSize}px`, height: `${t.markerSize}px` }"
     ></div>
     <button
       v-for="t in layout.labels"
@@ -545,7 +622,9 @@ onBeforeUnmount(() => {
         <b class="text-truncate">{{ shortName(t.ac) }}</b>
         <span class="ms-auto opacity-75 small">{{ km(t.dist) }}</span>
       </span>
-      <span class="d-block small mt-1 lh-1 opacity-75">{{ altShort(t.ac.alt_baro) }}{{ elevShort(t) }}</span>
+      <span class="d-flex small mt-1 lh-1 opacity-75">
+        {{ altShort(t.ac.alt_baro) }}<span class="ms-auto" title="Elevación sobre el horizonte">↑{{ int(Math.round(t.elevation)) }}°</span>
+      </span>
       <span v-if="chip(t)" class="badge mt-1" :class="chip(t).cls">{{ chip(t).text }}</span>
     </button>
 
@@ -595,7 +674,8 @@ onBeforeUnmount(() => {
       </span>
       <span class="badge" :class="gps.state === 'on' ? 'text-bg-success' : 'text-bg-secondary'">
         <i class="bi bi-geo-alt-fill me-1"></i>
-        <template v-if="gps.state === 'on'">GPS ±{{ int(gps.accuracy) }} m</template>
+        <template v-if="gps.state === 'on' && virtual">Vista desde el centro de la zona</template>
+        <template v-else-if="gps.state === 'on'">GPS ±{{ int(gps.accuracy) }} m</template>
         <template v-else-if="gps.state === 'waiting'">Buscando GPS… (centro de la zona)</template>
         <template v-else>Sin GPS · desde el centro de la zona</template>
       </span>
@@ -605,6 +685,20 @@ onBeforeUnmount(() => {
       </span>
       <span v-if="live.demo" class="badge text-bg-warning">MODO DEMO</span>
       <span v-if="!live.connected" class="badge text-bg-danger"><i class="bi bi-wifi-off me-1"></i>Reconectando…</span>
+    </div>
+
+    <!-- Lejos de la zona: se mira desde el centro de la zona -->
+    <div v-if="started && farFromZone && !selected" class="sky-panel sky-far small" data-sky-far>
+      <template v-if="virtual">
+        <i class="bi bi-geo-fill text-warning me-1"></i>
+        Estás a <b>{{ km(zoneDistM) }}</b> de la zona: desde acá esos aviones no se ven (quedan detrás del horizonte).
+        Te mostramos el cielo <b>como si estuvieras en el centro de la zona</b>, con tu brújula.
+        <button type="button" class="btn btn-link btn-sm text-light p-0 ms-1 align-baseline" @click="forceOwnPosition = true">Usar mi ubicación</button>
+      </template>
+      <template v-else>
+        <i class="bi bi-geo-alt-fill me-1"></i>Usando tu ubicación real, a {{ km(zoneDistM) }} de la zona.
+        <button type="button" class="btn btn-link btn-sm text-light p-0 ms-1 align-baseline" @click="forceOwnPosition = false">Ver desde la zona</button>
+      </template>
     </div>
 
     <!-- Ajustes: campo de visión y corrección de brújula -->
@@ -766,6 +860,35 @@ onBeforeUnmount(() => {
   stroke: rgba(150, 0, 0, 0.8);
   stroke-width: 3px;
 }
+.sky-3d {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.ladder {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 1;
+}
+.ladder-label {
+  fill: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 3px;
+}
+.sky-marker.ring {
+  border-width: 2px;
+  background: transparent;
+}
+.sky-marker.ring::after {
+  display: none;
+}
+.sky-far {
+  top: calc(max(10px, env(safe-area-inset-top)) + 52px);
+}
 .sky-leader line {
   stroke: rgba(255, 255, 255, 0.85);
   stroke-width: 1.5;
@@ -777,31 +900,42 @@ onBeforeUnmount(() => {
   stroke: #ffc107;
 }
 
-/* Silueta de la aeronave, girada hacia donde vuela. */
+/* Punto sobre la aeronave: anillo con mira. */
 .sky-marker {
   position: absolute;
-  color: #fff;
-  filter: drop-shadow(0 0 1px #000) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7));
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), inset 0 0 0 2px rgba(0, 0, 0, 0.25);
   pointer-events: none;
 }
-.sky-marker :deep(svg) {
-  display: block;
-  width: 100%;
-  height: 100%;
+.sky-marker::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .sky-marker.inside {
+  border-color: #ff4d5e;
   color: #ff4d5e;
   animation: pulse 1.2s ease-in-out infinite;
 }
 .sky-marker.eta {
+  border-color: #ffc107;
   color: #ffc107;
 }
 .sky-marker.quiet {
+  border-color: #adb5bd;
   color: #adb5bd;
 }
 @keyframes pulse {
   50% {
-    opacity: 0.55;
+    box-shadow: 0 0 0 8px rgba(255, 77, 94, 0.35);
   }
 }
 
