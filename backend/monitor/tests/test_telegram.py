@@ -4,7 +4,13 @@ from types import SimpleNamespace
 import httpx
 from django.test import SimpleTestCase, override_settings
 
-from monitor.alerts import alert_clock, build_alert, flightradar_url, format_alert_message
+from monitor.alerts import (
+    alert_clock,
+    build_alert,
+    flightradar_url,
+    format_alert_message,
+    public_base_url,
+)
 from monitor.telegram import (
     MAX_ATTEMPTS,
     TelegramError,
@@ -53,6 +59,19 @@ class MessageTests(SimpleTestCase):
         self.assertIn('<a href="https://www.flightradar24.com/ARG1309">Flightradar24</a>', text)
         # Va como pie de foto: Telegram corta en 1024 caracteres.
         self.assertLess(len(text), 1024)
+
+    @override_settings(SITE_URL="http://aviones.tail377893.ts.net:8443/")
+    def test_site_link_is_always_https(self):
+        # La web se sirve por HTTPS en 8443: un http:// en el .env rompía el enlace.
+        alert = build_alert(make_aircraft(), CNA)
+        self.assertIn('<a href="https://aviones.tail377893.ts.net:8443/e0b390">', format_alert_message(alert))
+
+    def test_public_base_url_keeps_http_only_for_local_addresses(self):
+        self.assertEqual(public_base_url(" HTTP://aviones.example "), "https://aviones.example")
+        self.assertEqual(public_base_url("https://aviones.example/"), "https://aviones.example")
+        self.assertEqual(public_base_url("http://localhost:5173"), "http://localhost:5173")
+        self.assertEqual(public_base_url("http://192.168.0.21:5173"), "http://192.168.0.21:5173")
+        self.assertEqual(public_base_url(""), "")
 
     @override_settings(SITE_URL="")
     def test_no_site_link_without_site_url(self):

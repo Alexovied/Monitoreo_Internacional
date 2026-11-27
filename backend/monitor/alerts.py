@@ -3,7 +3,8 @@
 import re
 from datetime import datetime
 from html import escape
-from urllib.parse import quote
+from ipaddress import ip_address
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -59,11 +60,34 @@ def flightradar_url(alert):
     return f"{FR24_URL}/{alert['lat']:.2f},{alert['lon']:.2f}/12"
 
 
+def _is_local_host(host):
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        return ip_address(host).is_private or ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def public_base_url(raw):
+    """SITE_URL listo para enlazar: sin barra final y siempre https.
+
+    La web pública se sirve por HTTPS (Tailscale, puerto 8443): un http:// en el
+    .env deja el enlace de Telegram roto, así que se corrige acá. Solo se respeta
+    http:// para direcciones locales (localhost o IP de la red), útiles al probar.
+    """
+    url = (raw or "").strip().rstrip("/")
+    if url.lower().startswith("http://") and not _is_local_host(urlsplit(url).hostname or ""):
+        url = "https://" + url[len("http://"):]
+    return url
+
+
 def site_url(alert):
     """Enlace a nuestra web con la aeronave seleccionada, o None si no hay SITE_URL."""
-    if not settings.SITE_URL:
+    base = public_base_url(settings.SITE_URL)
+    if not base:
         return None
-    return f"{settings.SITE_URL}/{quote(str(alert['hex']))}"
+    return f"{base}/{quote(str(alert['hex']))}"
 
 
 def _integer(value):
