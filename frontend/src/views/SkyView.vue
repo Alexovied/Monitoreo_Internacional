@@ -92,6 +92,7 @@ let stream = null
 let watchId = null
 let rafId = null
 let sensorTimer = null
+let iosOffsetGood = false // ya se midió con el celular en una posición confiable
 let iosOffset = null // iOS: alpha es relativo; webkitCompassHeading da el norte
 
 // Posición del usuario: GPS, o el centro de la zona mientras no hay GPS.
@@ -170,7 +171,7 @@ const layout = computed(() => {
   const offscreen = []
   for (const t of targets.value) {
     const p = project(c, t.dir, w, h, focal.value)
-    if (p.visible) onscreen.push({ ...t, x: p.x, y: p.y, px: modelPx(t.dist), markerSize: modelPx(t.dist) * 0.7 })
+    if (p.visible) onscreen.push({ ...t, x: p.x, y: p.y, px: modelPx(t.dist / lift.value), markerSize: modelPx(t.dist / lift.value) * 0.7 })
     else offscreen.push({ t, p })
   }
   // Varias en la misma dirección: se reparten a lo largo del borde para que
@@ -255,7 +256,7 @@ const layout = computed(() => {
 
 // Tamaño en pantalla del modelo 3D: más cerca, más grande.
 function modelPx(dist) {
-  return Math.max(38, Math.min(110, 110 - dist / 350))
+  return Math.max(64, Math.min(190, 190 - dist / 130))
 }
 
 // Ascenso o descenso en grados (velocidad vertical en ft/min sobre la horizontal).
@@ -474,8 +475,14 @@ function onOrientation(e) {
     // iOS: alpha arranca en un rumbo arbitrario. En cualquier posición vale
     // rumbo = 360 − alpha (con alpha respecto del norte), así que se calcula
     // la diferencia y se suaviza para que la brújula no tiemble.
+    // La brújula de iOS solo es confiable con el celular por debajo de la
+    // vertical; apuntando al cielo se deja la última diferencia buena (alpha
+    // sigue al giroscopio, que no se desvía en ese rato).
     const offset = norm360(360 - e.webkitCompassHeading - e.alpha)
-    iosOffset = iosOffset === null ? offset : iosOffset + 0.1 * angleDiff(offset, iosOffset)
+    const reliable = Math.abs(e.beta) < 70
+    if (iosOffset === null || (reliable && !iosOffsetGood)) iosOffset = offset
+    else if (reliable) iosOffset += 0.1 * angleDiff(offset, iosOffset)
+    if (reliable) iosOffsetGood = true
     alpha = e.alpha + iosOffset
   } else if (!e.absolute && ORIENTATION_EVENT === 'deviceorientation') {
     return // orientación relativa, sin norte: no sirve
