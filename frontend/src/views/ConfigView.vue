@@ -14,12 +14,12 @@ const MAX_PREDICT_MIN = 30 // igual que MAX_PREDICT_MINUTES del backend
 const FIELDS = [
   'zone_name', 'zone_lat', 'zone_lon', 'zone_radius_nm', 'zone_floor_m', 'zone_ceiling_m',
   'poll_interval_s', 'query_radius_nm', 'telegram_chat_id', 'guest_access',
-  'temp_alert_enabled', 'temp_alert_threshold_c', 'predict_minutes',
+  'temp_alert_enabled', 'temp_alert_threshold_c', 'predict_minutes', 'behavior_alerts',
 ]
 // Secciones de la página; cada campo con error marca su sección.
 const SECTIONS = [
   { key: 'zona', label: 'Zona', icon: 'bi-bullseye', fields: ['zone_', 'poll_interval_s', 'query_radius_nm'] },
-  { key: 'alertas', label: 'Alertas', icon: 'bi-bell', fields: ['predict_minutes', 'excluded_aircraft'] },
+  { key: 'alertas', label: 'Alertas', icon: 'bi-bell', fields: ['predict_minutes', 'behavior_alerts', 'excluded_aircraft'] },
   { key: 'telegram', label: 'Telegram', icon: 'bi-telegram', fields: ['telegram_'] },
   { key: 'sistema', label: 'Sistema', icon: 'bi-hdd', fields: ['guest_access', 'temp_alert_'] },
 ]
@@ -149,6 +149,7 @@ function payload() {
     temp_alert_enabled: !!form.temp_alert_enabled,
     temp_alert_threshold_c: num(form.temp_alert_threshold_c),
     predict_minutes: num(form.predict_minutes),
+    behavior_alerts: !!form.behavior_alerts,
   }
   body.excluded_aircraft = [...excluded.value]
   if (token.value.trim()) body.telegram_bot_token = token.value.trim()
@@ -443,6 +444,34 @@ onMounted(load)
       </div>
 
       <div v-show="section === 'alertas'">
+      <!-- Comportamiento raro -->
+      <section class="card shadow-sm mb-3" data-section="behavior">
+        <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">
+          <div>
+            <h2 class="h5 mb-0"><i class="bi bi-activity text-warning me-2"></i>Comportamiento raro</h2>
+            <div class="small text-body-secondary">
+              Avisa en la web y por Telegram cuando una aeronave da vueltas cerca de la zona, declara una emergencia
+              (códigos 7500, 7600 o 7700), baja de golpe o deja de transmitir mientras vuela dentro de la zona. También
+              manda a Telegram los avistamientos sin transponder que se cargan desde el Modo cielo.
+            </div>
+          </div>
+          <span class="badge" :class="saved.behavior_alerts ? 'text-bg-success' : 'text-bg-secondary'">
+            <i class="bi me-1" :class="saved.behavior_alerts ? 'bi-check-circle' : 'bi-dash-circle'"></i>
+            {{ saved.behavior_alerts ? 'Activado' : 'Desactivado' }}
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="form-check form-switch">
+            <input id="behavior_alerts" v-model="form.behavior_alerts" class="form-check-input" type="checkbox" role="switch" />
+            <label class="form-check-label" for="behavior_alerts">Avisar de comportamientos raros</label>
+          </div>
+          <div class="form-text">
+            Los aviones de la lista «no dan alerta» tampoco generan estos avisos. Los ingresos a la zona y todo lo demás
+            quedan igual en el <RouterLink to="/registro">Registro</RouterLink>.
+          </div>
+        </div>
+      </section>
+
       <!-- Aviso anticipado -->
       <section class="card shadow-sm mb-3" data-section="predict">
         <div class="card-header bg-body d-flex flex-wrap align-items-center justify-content-between gap-3 py-3">

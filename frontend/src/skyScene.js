@@ -232,7 +232,7 @@ function normalize(scene, file) {
 // Casi todos traen la nariz hacia -Z (queda en +Y tras el giro). Excepciones:
 const NOSE_PLUS_Z = new Set([])
 
-function loadModel(file) {
+export function loadModel(file) {
   let entry = gltfCache.get(file)
   if (!entry) {
     entry = { model: null, failed: false }

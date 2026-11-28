@@ -21,6 +21,9 @@ https://github.com/wiedehopf/readsb/blob/dev/README-json.md
       track     rumbo verdadero sobre el suelo, en grados
       true_heading  proa verdadera; en tierra suele venir en lugar de track
       baro_rate velocidad vertical barométrica, en pies por minuto
+      squawk    código del transpondedor, 4 dígitos (7500, 7600 y 7700 son emergencias)
+      emergency estado de emergencia ADS-B: "none", "general", "lifeguard", "minfuel",
+                "nordo", "unlawful", "downed"
       dst      distancia al punto consultado, en NM
       seen_pos  segundos transcurridos desde la última posición, antes de ``now``
 """
@@ -69,6 +72,8 @@ class Aircraft:
     # Categoría ADS-B del emisor: A1 liviana, A2 chica, A3+ mediana/grande, A7 helicóptero.
     category: str | None = None
     baro_rate: float | None = None  # pies por minuto (+ sube, - baja)
+    squawk: str | None = None  # código del transpondedor (7500/7600/7700 = emergencia)
+    emergency: str | None = None  # estado de emergencia ADS-B ("none" si no hay)
 
     @property
     def label(self):
@@ -162,6 +167,8 @@ def parse_aircraft(raw, now):
             timestamp=now - values["seen_pos"],
             category=_text(raw.get("category")),
             baro_rate=_number(raw.get("baro_rate")),
+            squawk=_text(raw.get("squawk")),
+            emergency=_text(raw.get("emergency")),
         ),
         (),
     )

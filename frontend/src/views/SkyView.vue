@@ -9,7 +9,10 @@
 // (computadora, permiso negado) queda un modo simulado: se arrastra para mirar.
 import { computed, markRaw, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { live } from '../live'
+import { api } from '../api'
+import { kindOf } from '../incidents'
+import { hideOwnIncident, live } from '../live'
+import { session } from '../session'
 import { SHAPES, shapeOf } from '../aircraftShapes'
 import { modelFileFor } from '../skyModels'
 import { altitude, dec1, heading as fmtHeading, flightradarUrl, identification, int, M_PER_FT, speed } from '../format'
@@ -366,10 +369,97 @@ function etaText(min) {
 }
 
 function chip(t) {
+  // Comportamiento raro reciente (backend/monitor/behavior.py): va primero.
+  const odd = t.ac.behavior?.[0]
+  if (odd) return { text: kindOf(odd).short, cls: `text-bg-${kindOf(odd).color}` }
   if (t.status === 'inside') return { text: 'EN LA ZONA', cls: 'text-bg-danger' }
   if (t.status === 'quiet') return { text: 'EN LA ZONA · SIN ALERTA', cls: 'text-bg-secondary' }
   if (t.status === 'eta') return { text: etaText(t.ac.eta_min), cls: 'text-bg-warning' }
   return null
+}
+
+// --- avistamiento: algo que se ve y no tiene transponder -----------------------
+//
+// Se apunta la mira (el centro de la pantalla) al objeto. El servidor dice si en
+// esa dirección hay alguna aeronave con transponder; si no hay, se guarda como
+// avistamiento con la dirección, la hora y una foto de la cámara.
+const canReport = computed(() => !!session.user && !session.user.is_guest)
+const report = reactive({ step: 'off', aim: null, result: null, note: '', error: '', photo: null, saved: null })
+// off | aim | checking | match | none | saving | done
+
+function openReport() {
+  selectedHex.value = null
+  showSettings.value = false
+  Object.assign(report, { step: 'aim', result: null, note: '', error: '', photo: null, saved: null })
+}
+
+function closeReport() {
+  report.step = 'off'
+}
+
+function reportBody() {
+  const obs = observer.value
+  return {
+    observer: obs.source === 'gps' ? { source: 'gps', lat: obs.lat, lon: obs.lon, alt: obs.alt } : { source: 'zone' },
+    azimuth: norm360(report.aim.heading),
+    elevation: report.aim.pitch,
+    lift: lift.value,
+  }
+}
+
+// Cuadro actual de la cámara como JPEG (o null si no hay cámara).
+function snapshot() {
+  const video = videoRef.value
+  if (cameraState.value !== 'on' || !video?.videoWidth) return null
+  try {
+    const k = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(video.videoWidth * k)
+    canvas.height = Math.round(video.videoHeight * k)
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.72)
+  } catch {
+    return null
+  }
+}
+
+async function checkSighting() {
+  if (!look.value || !observer.value) return
+  // La dirección y la foto son las del momento en que se toca el botón.
+  report.aim = { ...look.value }
+  report.photo = snapshot()
+  report.step = 'checking'
+  report.error = ''
+  try {
+    report.result = await api('/sightings/check/', { method: 'POST', body: reportBody() })
+    report.step = report.result.match ? 'match' : 'none'
+  } catch (err) {
+    report.error = err.message
+    report.step = 'aim'
+  }
+}
+
+async function saveSighting(force = false) {
+  const previous = report.step
+  report.step = 'saving'
+  report.error = ''
+  try {
+    report.saved = await api('/sightings/', {
+      method: 'POST',
+      body: { ...reportBody(), note: report.note.trim().slice(0, 300), photo: report.photo, force },
+    })
+    hideOwnIncident(report.saved.id) // el aviso para los demás: a quien lo cargó no le hace falta
+    report.step = 'done'
+  } catch (err) {
+    report.error = err.message
+    report.step = previous
+  }
+}
+
+function openSaved() {
+  const id = report.saved?.id
+  closeReport()
+  router.push(id ? { name: 'replay', params: { id } } : { name: 'registry' })
 }
 
 const lookText = computed(() => {
@@ -727,7 +817,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Lejos de la zona: se mira desde el centro de la zona -->
-    <div v-if="started && farFromZone && !selected" class="sky-panel sky-far small" data-sky-far>
+    <div v-if="started && farFromZone && !selected && report.step === 'off'" class="sky-panel sky-far small" data-sky-far>
       <template v-if="virtual">
         <i class="bi bi-geo-fill text-warning me-1"></i>
         Estás a <b>{{ km(zoneDistM) }}</b> de la zona: desde acá esos aviones no se ven (quedan detrás del horizonte).
@@ -738,6 +828,79 @@ onBeforeUnmount(() => {
       <template v-else>
         <i class="bi bi-geo-alt-fill me-1"></i>Usando tu ubicación real, a {{ km(zoneDistM) }} de la zona.
         <button type="button" class="btn btn-link btn-sm text-light p-0 ms-1 align-baseline" @click="forceOwnPosition = false">Ver desde la zona</button>
+      </template>
+    </div>
+
+    <!-- Avistamiento: mira en el centro y panel con el resultado -->
+    <div v-if="report.step !== 'off' && report.step !== 'done'" class="sky-crosshair" aria-hidden="true">
+      <span></span>
+    </div>
+    <button
+      v-if="started && canReport && cam && report.step === 'off' && !selected"
+      type="button"
+      class="btn btn-info shadow rounded-pill sky-report-btn"
+      title="¿Ves algo en el cielo que no aparece acá? Apuntale y reportalo"
+      data-sky-report
+      @click="openReport"
+    >
+      <i class="bi bi-eye-fill me-1"></i>Reportar
+    </button>
+    <div v-if="report.step !== 'off'" class="sky-panel sky-card sky-report small" data-sky-report-panel>
+      <div class="d-flex align-items-center gap-2 mb-1">
+        <strong><i class="bi bi-eye-fill me-1"></i>Reportar lo que veo</strong>
+        <button type="button" class="btn-close btn-close-white ms-auto" aria-label="Cerrar" @click="closeReport"></button>
+      </div>
+
+      <template v-if="report.step === 'aim' || report.step === 'checking'">
+        <div>Poné la mira sobre lo que ves en el cielo y tocá <b>Comprobar</b>. Te decimos si es una aeronave con transponder.</div>
+        <div class="tabular opacity-75 mt-1">Mira: {{ lookText }}</div>
+        <div v-if="report.error" class="text-warning mt-1">{{ report.error }}</div>
+        <button type="button" class="btn btn-info btn-sm mt-2 w-100" :disabled="report.step === 'checking' || !look" data-sky-check @click="checkSighting">
+          <span v-if="report.step === 'checking'" class="spinner-border spinner-border-sm me-1"></span>Comprobar
+        </button>
+      </template>
+
+      <template v-else-if="report.step === 'match'">
+        <div>
+          <i class="bi bi-check-circle-fill text-success me-1"></i>Ahí está <b>{{ report.result.match.label }}</b>
+          <template v-if="report.result.match.type"> ({{ report.result.match.type }})</template>,
+          a {{ int(report.result.match.separation) }}° de la mira y {{ km(report.result.match.distance_m) }}. Tiene transponder.
+        </div>
+        <div v-if="report.error" class="text-warning mt-1">{{ report.error }}</div>
+        <div class="d-flex gap-2 mt-2">
+          <button type="button" class="btn btn-outline-light btn-sm flex-grow-1" @click="closeReport">Es ese</button>
+          <button type="button" class="btn btn-warning btn-sm flex-grow-1" data-sky-force @click="saveSighting(true)">No es ese: reportar</button>
+        </div>
+      </template>
+
+      <template v-else-if="report.step === 'none' || report.step === 'saving'">
+        <div>
+          <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i><b>No hay ninguna aeronave con transponder en esa dirección.</b>
+          <template v-if="report.result.candidates.length">
+            La más cercana es {{ report.result.candidates[0].label }}, a {{ int(report.result.candidates[0].separation) }}° de la mira.
+          </template>
+          <template v-else>El sistema no ve ninguna aeronave en el área.</template>
+        </div>
+        <div v-if="!report.result.feed_ok" class="text-warning mt-1">Ojo: en este momento la fuente de datos no responde, puede faltar tránsito.</div>
+        <input v-model="report.note" type="text" class="form-control form-control-sm mt-2" maxlength="300" placeholder="¿Qué ves? (opcional: avioneta blanca, dron…)" data-sky-note />
+        <div class="opacity-75 mt-1">
+          Se guarda la dirección<template v-if="report.photo">, la hora y una foto de la cámara</template><template v-else> y la hora</template>.
+        </div>
+        <div v-if="report.error" class="text-warning mt-1">{{ report.error }}</div>
+        <div class="d-flex gap-2 mt-2">
+          <button type="button" class="btn btn-outline-light btn-sm" :disabled="report.step === 'saving'" @click="report.step = 'aim'">Volver a apuntar</button>
+          <button type="button" class="btn btn-info btn-sm flex-grow-1" :disabled="report.step === 'saving'" data-sky-save @click="saveSighting(false)">
+            <span v-if="report.step === 'saving'" class="spinner-border spinner-border-sm me-1"></span>Guardar avistamiento
+          </button>
+        </div>
+      </template>
+
+      <template v-else-if="report.step === 'done'">
+        <div><i class="bi bi-check-circle-fill text-success me-1"></i>Avistamiento guardado. Quedó en el registro y se avisó a los demás.</div>
+        <div class="d-flex gap-2 mt-2">
+          <button type="button" class="btn btn-outline-light btn-sm flex-grow-1" @click="closeReport">Seguir mirando</button>
+          <button type="button" class="btn btn-info btn-sm flex-grow-1" data-sky-open-saved @click="openSaved">Ver en el registro</button>
+        </div>
       </template>
     </div>
 
@@ -1138,6 +1301,56 @@ onBeforeUnmount(() => {
 }
 .sky-card {
   bottom: calc(max(10px, env(safe-area-inset-bottom)) + 34px);
+}
+.sky-report-btn {
+  position: absolute;
+  right: 10px;
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 62px);
+  z-index: 3;
+}
+.sky-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 74px;
+  height: 74px;
+  margin: -37px 0 0 -37px;
+  border: 2px solid #39c0ed;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+.sky-crosshair::before,
+.sky-crosshair::after {
+  content: '';
+  position: absolute;
+  background: #39c0ed;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+.sky-crosshair::before {
+  left: 50%;
+  top: -14px;
+  bottom: -14px;
+  width: 2px;
+  margin-left: -1px;
+}
+.sky-crosshair::after {
+  top: 50%;
+  left: -14px;
+  right: -14px;
+  height: 2px;
+  margin-top: -1px;
+}
+.sky-crosshair span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: #0c1622;
+  border: 2px solid #39c0ed;
 }
 .sky-more {
   position: absolute;

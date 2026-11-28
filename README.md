@@ -131,6 +131,34 @@ Cómo funciona: con la posición del usuario (GPS) y la de cada aeronave se calc
 
 > **Requiere HTTPS.** Los navegadores solo dan acceso a la cámara, al GPS y a la brújula en páginas `https://` (o `localhost`). Entrando por `http://<ip>:5173` la vista avisa y ofrece solo el modo simulado. En la Raspberry Pi se usa la dirección HTTPS de Tailscale (`https://<equipo>.<tailnet>.ts.net…`); por ejemplo, con `tailscale serve --bg --https=8443 http://localhost:5173` Tailscale publica el frontend con certificado válido, y el WebSocket pasa por la misma dirección (`wss://`). El servidor de Vite ya acepta los nombres `*.ts.net` (`allowedHosts` en `vite.config.js`).
 
+### Comportamiento raro
+
+Además del ingreso a la zona, el monitor avisa (en la web y por Telegram) de cuatro cosas que le importan a un operador. Se calculan con los mismos datos de adsb.fi, en `backend/monitor/behavior.py`:
+
+| Aviso | Cuándo |
+|---|---|
+| **Da vueltas cerca de la zona** | La aeronave acumuló una vuelta y media (540° de giro, con signo) en los últimos 12 minutos, a menos de tres radios de la zona (o radio + 10 NM). Un avión que pasa de largo casi no gira; uno que orbita suma 360° por vuelta. |
+| **Emergencia declarada** | El transpondedor informa 7500 (interferencia ilícita), 7600 (falla de comunicaciones) o 7700 (emergencia general), o el estado de emergencia ADS-B. En toda el área de cobertura. |
+| **Descenso brusco** | Dos lecturas seguidas de más de 4.000 ft/min de descenso cerca de la zona (uno de línea baja a 1.500-2.500). |
+| **Dejó de transmitir dentro de la zona** | Estaba volando adentro (más de 80 kt, sin estar bajando para aterrizar), se la venía recibiendo sin huecos y de golpe no se la ve más. Si desaparecen varias a la vez se toma como un corte de la fuente y no se avisa. |
+
+Cada aviso se da una sola vez mientras dura (y no se repite hasta 30 minutos después de que se corte). La aeronave queda marcada en el mapa y en el Modo cielo durante unos minutos. Los aviones de la lista «no dan alerta» tampoco generan estos avisos. Se apagan en **Configuración → Alertas → Comportamiento raro**.
+
+### Avistamientos sin transponder
+
+El sistema solo ve aeronaves que transmiten ADS-B. Para lo que no transmite está el botón **Reportar** del Modo cielo: se pone la mira sobre lo que se ve en el cielo y se toca **Comprobar**. El servidor compara esa dirección con lo que el monitor está viendo en ese momento:
+
+- Si hay una aeronave con transponder a menos de 12° de la mira, dice cuál es (y se puede reportar igual con «No es ese»).
+- Si no hay ninguna, se guarda un **avistamiento** con la dirección, la altura angular, la hora, quién lo cargó, una nota opcional y una foto de la cámara. Les aparece a todos los usuarios conectados y va a Telegram.
+
+Los visitantes no pueden reportar.
+
+### Registro y repetición en 3D
+
+En **Registro** queda todo lo que pasó: ingresos a la zona, comportamientos raros y avistamientos, del más nuevo al más viejo (se conservan los últimos 500). Cada uno abre su **repetición en 3D**: la zona como un cilindro, el recorrido de la aeronave desde unos minutos antes hasta diez minutos después, y el modelo moviéndose por él con una línea de tiempo (reproducir, pausar, velocidad ×1 a ×60, ir al momento del incidente, seguir a la aeronave). La vista se gira con el dedo o el mouse. La altura se dibuja exagerada ×2 para que se lea. En un avistamiento se muestra hacia dónde apuntaba la cámara, la foto y qué había con transponder alrededor.
+
+El administrador puede borrar entradas y crear un **simulacro** de cada tipo (botón «Simulacro»): un incidente de mentira, marcado como tal, que aparece en todos los navegadores pero no va a Telegram. Sirve para probar y para mostrar el sistema sin esperar a que pase algo.
+
 ### Usuarios (administrador)
 
 Desde **Usuarios** se crean, editan y desactivan usuarios, y se cambia su rol o su contraseña.
@@ -359,7 +387,7 @@ El código está montado como volumen en los contenedores:
 
 ### Dónde quedan los datos
 
-La base SQLite está en el volumen de Docker `avion_backend-data`, en `/data/db.sqlite3` dentro del contenedor. Sobrevive a `docker compose down` y a las reconstrucciones. Guarda **solo** usuarios, roles, sesiones y configuración.
+La base SQLite está en el volumen de Docker `avion_backend-data`, en `/data/db.sqlite3` dentro del contenedor. Sobrevive a `docker compose down` y a las reconstrucciones. Guarda usuarios, roles, sesiones, configuración y el registro de incidentes (con sus recorridos y las fotos de los avistamientos).
 
 Para **empezar de cero** (borra usuarios y configuración): `docker compose down -v`. Al volver a levantar, la configuración se toma otra vez del `.env`.
 
@@ -423,6 +451,12 @@ Se usa **únicamente** la [API abierta de adsb.fi](https://github.com/adsbfi/ope
 │       ├── zone.py           Cilindro de la zona y conversión m ↔ ft
 │       ├── openair.py        Lectura de archivos OpenAir
 │       ├── state.py          Diccionarios en memoria, ingresos y purga
+│       ├── behavior.py       Comportamiento raro: vueltas, emergencia, descenso brusco, señal perdida
+│       ├── sightings.py      Avistamientos: qué hay con transponder hacia donde apunta la cámara
+│       ├── models.py         Incident: el registro (con el recorrido para la repetición)
+│       ├── records.py        Guardado de incidentes desde el monitor y las vistas
+│       ├── simulate.py       Simulacros (incidentes de mentira para probar y mostrar)
+│       ├── views.py, urls.py API del registro y de los avistamientos
 │       ├── service.py        Ciclo del monitor
 │       ├── alerts.py         Contenido de la alerta
 │       ├── telegram.py       Envío a Telegram (cola, reintentos, foto con leyenda)
@@ -439,11 +473,13 @@ Se usa **únicamente** la [API abierta de adsb.fi](https://github.com/adsbfi/ope
         ├── sky.js                          Cuentas del Modo cielo (azimut, elevación, proyección)
         ├── skyScene.js                     Modelos 3D del Modo cielo (three.js)
         ├── skyModels.js                    Qué modelo 3D se usa para cada tipo de aeronave
+        ├── incidents.js                    Tipos de incidente: nombre, ícono y color
+        ├── replayScene.js                  Repetición en 3D de un incidente (three.js)
         ├── components/AircraftMap.vue      Mapa Leaflet
         ├── components/AlertToasts.vue      Avisos en pantalla (toasts)
         ├── components/ConfirmDialog.vue    Modal de confirmación
         ├── components/FormField.vue        Campo de formulario con etiqueta, unidad y error
-        ├── views/                          Login, Mapa, Modo cielo, Usuarios, Configuración
+        ├── views/                          Login, Mapa, Modo cielo, Registro, Repetición, Usuarios, Configuración
         └── styles.css                      Los pocos estilos propios (el resto es Bootstrap)
 ```
 
@@ -474,6 +510,13 @@ Todas las rutas exigen sesión, salvo `csrf`, `login`, `guest` y `options`. Un v
 | `POST /api/config/telegram-test/` | Envía un mensaje de prueba al grupo. | Admin |
 | `GET /api/system/` | Temperatura, memoria, disco y tiempo encendido del equipo, y el ajuste del aviso de temperatura. | Admin |
 | `GET /api/system/version/` | Commit instalado y cuántos cambios hay en GitHub que no tiene (`updates.behind`). | Admin |
+| `GET /api/incidents/` | Registro: últimos 200 incidentes, sin el recorrido. `?kind=entry\|loiter\|emergency\|rapid_descent\|signal_lost\|sighting` filtra. | Con sesión |
+| `GET /api/incidents/{id}/` | Un incidente con la zona, los datos y el recorrido (`track`: `[hora, lat, lon, altitud ft, kt, rumbo]`). | Con sesión |
+| `GET /api/incidents/{id}/photo/` | Foto de un avistamiento (JPEG). | Con sesión |
+| `DELETE /api/incidents/{id}/` | Borra una entrada del registro. | Admin |
+| `POST /api/incidents/simulate/` | `{kind}`: crea un simulacro de ese tipo. No va a Telegram. | Admin |
+| `POST /api/sightings/check/` | `{observer: {source: "gps"\|"zone", lat, lon, alt}, azimuth, elevation, lift}`: dice si hay una aeronave con transponder en esa dirección (`match`) y las más cercanas. No guarda nada. | Con sesión |
+| `POST /api/sightings/` | Lo mismo más `note`, `photo` (JPEG en base64) y `force`: guarda el avistamiento. **409** si hay una aeronave identificada y no se manda `force`. Máximo 12 por minuto por usuario. | Con sesión |
 | `GET /api/health/` | Estado del backend. | — |
 
 **WebSocket** `ws://<host>/ws/aircraft/`: solo envía datos del servidor al navegador, en JSON con un campo `type`.
@@ -481,8 +524,9 @@ Todas las rutas exigen sesión, salvo `csrf`, `login`, `guest` y `options`. Un v
 | `type` | Cuándo | Contenido |
 |---|---|---|
 | `snapshot` | Al conectarse. | `aircraft`, `config` (sin el token) y `status`. |
-| `aircraft` | En cada ciclo. | Lista completa de aeronaves (cada una con `inside`, `excluded` y `eta_min`: minutos estimados hasta entrar a la zona, o `null`) y `status`. |
-| `alert` | Una aeronave ingresó a la zona. | `alert`: identificación, altitud, velocidad, rumbo, distancia y hora. |
+| `aircraft` | En cada ciclo. | Lista completa de aeronaves (cada una con `inside`, `excluded`, `eta_min`: minutos estimados hasta entrar a la zona, o `null`, y `behavior`: comportamientos raros recientes) y `status`. |
+| `alert` | Una aeronave ingresó a la zona. | `alert`: identificación, altitud, velocidad, rumbo, distancia, hora e `incident_id` (su entrada en el registro). |
+| `incident` | Comportamiento raro, avistamiento o simulacro. | `incident`: `id`, `kind`, `title`, `summary`, identificación y hora. |
 | `config` | El administrador guardó cambios. | `config`. |
 
 Conexiones rechazadas: sin sesión, usuario desactivado u origen no permitido. Al desactivar un usuario, su conexión se cierra con el código 4401.

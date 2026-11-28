@@ -108,6 +108,9 @@ class SystemConfig(models.Model):
         default=5,
         validators=[MaxValueValidator(MAX_PREDICT_MINUTES)],
     )
+    # Avisos de comportamiento raro (ver monitor.behavior): vueltas cerca de la
+    # zona, emergencia declarada, descenso brusco, transpondedor que se apaga.
+    behavior_alerts = models.BooleanField("avisos de comportamiento raro", default=True)
     # Aviso de mantenimiento para todos los usuarios; vacío = sin aviso.
     maintenance_message = models.CharField("aviso de mantenimiento", max_length=300, blank=True, default="")
     # Botón «Entrar como visitante» en el login. Solo vale si además el .env

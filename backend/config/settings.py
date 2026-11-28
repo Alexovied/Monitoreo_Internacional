@@ -117,6 +117,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "login": "10/min",
         "guest": "20/min",
+        "sighting": "12/min",
     },
 }
 

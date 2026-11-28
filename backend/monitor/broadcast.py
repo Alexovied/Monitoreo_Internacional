@@ -4,6 +4,7 @@ Todos los mensajes son JSON con un campo ``type``:
     snapshot  al conectarse: aeronaves, configuración pública y estado
     aircraft  en cada ciclo del monitor: lista completa de aeronaves y estado
     alert     una aeronave ingresó a la zona
+    incident  comportamiento raro, avistamiento sin transponder o simulacro
     config    el administrador cambió la configuración
 """
 
@@ -35,6 +36,7 @@ def public_config(config):
         "query_radius_nm": config.query_radius_nm,
         "telegram_enabled": config.telegram_enabled,
         "predict_minutes": getattr(config, "predict_minutes", 0),
+        "behavior_alerts": getattr(config, "behavior_alerts", False),
         # Zona horaria del sistema (TZ del .env), para mostrar la hora local de la zona.
         "time_zone": settings.TIME_ZONE,
         "maintenance": config.maintenance_message,
@@ -52,6 +54,15 @@ async def send_aircraft(aircraft, status):
 
 async def send_alert(alert):
     await send({"type": "alert", "alert": alert})
+
+
+async def send_incident(incident):
+    """Comportamiento raro, avistamiento o simulacro: va al registro de cada navegador."""
+    await send({"type": "incident", "incident": incident})
+
+
+def send_incident_sync(incident):
+    async_to_sync(send_incident)(incident)
 
 
 async def send_config(config):

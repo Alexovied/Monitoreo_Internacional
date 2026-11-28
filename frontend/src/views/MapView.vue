@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AircraftMap from '../components/AircraftMap.vue'
 import { SHAPES, shapeOf } from '../aircraftShapes'
+import { kindOf } from '../incidents'
 import { live } from '../live'
 import {
   altitude,
@@ -317,6 +318,11 @@ function positionAge(ac) {
             <span v-else-if="selected.inside" class="badge text-bg-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>EN LA ZONA</span>
             <span v-else-if="selected.excluded" class="badge text-bg-secondary" title="Está en la lista de aviones que no dan alerta"><i class="bi bi-bell-slash me-1"></i>SIN ALERTA</span>
           </div>
+          <div v-if="selected.behavior?.length" class="d-flex flex-wrap gap-1 mb-2" data-behavior-badges>
+            <span v-for="b in selected.behavior" :key="b" class="badge" :class="`text-bg-${kindOf(b).color}`" :title="kindOf(b).title">
+              <i class="bi me-1" :class="kindOf(b).icon"></i>{{ kindOf(b).short }}
+            </span>
+          </div>
           <dl class="row small mb-0">
             <dt class="col-4 fw-normal text-body-secondary">Tipo</dt>
             <dd class="col-8 mb-1 fw-semibold">{{ SHAPES[shapeOf(selected)].label }}</dd>
@@ -383,7 +389,8 @@ function positionAge(ac) {
           >
             <i class="bi" :class="ac.alt_baro === 'ground' ? 'bi-airplane-engines' : 'bi-airplane-fill'"></i>
             <span class="fw-semibold flex-grow-1 text-truncate">{{ ac.flight || ac.registration || ac.hex.toUpperCase() }}<i
-                v-if="ac.excluded" class="bi bi-bell-slash ms-1 opacity-50" title="No da alerta"></i></span>
+                v-if="ac.excluded" class="bi bi-bell-slash ms-1 opacity-50" title="No da alerta"></i><i
+                v-if="ac.behavior?.length" class="bi ms-1 text-warning" :class="kindOf(ac.behavior[0]).icon" :title="kindOf(ac.behavior[0]).title"></i></span>
             <span class="small opacity-75" style="width: 3em">{{ ac.type || '' }}</span>
             <span class="small text-end text-nowrap" style="width: 4.8em">{{ altitudeShort(ac.alt_baro) }}</span>
             <span class="small text-end text-nowrap opacity-75" style="width: 4.6em">{{ dec1(ac.dst) }} NM</span>

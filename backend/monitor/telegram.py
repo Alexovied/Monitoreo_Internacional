@@ -296,8 +296,9 @@ class TelegramNotifier:
         if not config.telegram_enabled:
             logger.info("Telegram no está configurado: la alerta de %s no se envía por Telegram.", alert["label"])
             return False
-        text = format_alert_message(alert)
-        photo = await build_map(render or self._render_map, alert, zone)
+        # Un aviso que ya trae su texto (p. ej. un avistamiento) va sin mapa.
+        text = alert.get("text") or format_alert_message(alert)
+        photo = alert.get("photo") or await build_map(render or self._render_map, alert, zone)
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if attempt > 1:
                 config = await self._load_config()

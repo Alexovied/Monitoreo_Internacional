@@ -1,7 +1,8 @@
 // Conexión en tiempo real con el backend (WebSocket /ws/aircraft/).
 //
 // Mensajes que llegan: snapshot (al conectar), aircraft (cada ciclo),
-// alert (ingreso a la zona) y config (cambio de configuración).
+// alert (ingreso a la zona), incident (comportamiento raro, avistamiento sin
+// transponder o simulacro) y config (cambio de configuración).
 
 import { reactive } from 'vue'
 import { api } from './api'
@@ -16,6 +17,8 @@ export const live = reactive({
   config: null,
   status: null,
   alerts: [], // alertas recibidas en esta sesión del navegador (solo en memoria)
+  incidents: [], // comportamientos raros y avistamientos recibidos en esta sesión
+  incidentSeq: 0, // cambia con cada incidente nuevo (el registro se vuelve a cargar)
   selectedHex: null,
   focusHex: null, // pedido de centrar el mapa en una aeronave (desde un aviso)
   sound: readSoundSetting(),
@@ -123,6 +126,7 @@ export function disconnectLive() {
   live.aircraft = []
   live.status = null
   live.alerts = []
+  live.incidents = []
   live.selectedHex = null
 }
 
@@ -187,6 +191,10 @@ function handle(message) {
       break
     case 'alert':
       addAlert(message.alert)
+      live.incidentSeq += 1
+      break
+    case 'incident':
+      addIncident(message.incident)
       break
   }
 }
@@ -201,5 +209,29 @@ function addAlert(alert) {
 
 export function dismissToast(id) {
   const item = live.alerts.find((a) => a.id === id)
+  if (item) item.toast = false
+}
+
+// Incidentes cargados desde este navegador (un avistamiento): no se le avisa a
+// quien lo acaba de cargar. El aviso puede llegar antes o después de la respuesta.
+const ownIncidents = new Set()
+export function hideOwnIncident(id) {
+  ownIncidents.add(id)
+  for (const item of live.incidents) if (item.id === id) item.toast = false
+}
+
+function addIncident(incident) {
+  const own = ownIncidents.has(incident.id)
+  const item = { ...incident, key: ++alertSeq, receivedAt: Date.now(), toast: !own }
+  live.incidents.unshift(item)
+  live.incidents.splice(MAX_ALERTS)
+  live.incidentSeq += 1
+  if (own) return
+  if (live.sound) beep()
+  setTimeout(() => dismissIncident(item.key), TOAST_SECONDS * 1000)
+}
+
+export function dismissIncident(key) {
+  const item = live.incidents.find((i) => i.key === key)
   if (item) item.toast = false
 }

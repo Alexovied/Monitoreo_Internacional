@@ -14,7 +14,7 @@ from django.conf import settings
 
 from configuration.models import SystemConfig
 
-from . import adsbfi, broadcast, exclusions
+from . import adsbfi, behavior, broadcast, exclusions
 from .alerts import build_alert
 from .state import AircraftState
 from .telegram import TelegramNotifier
@@ -33,6 +33,17 @@ PREDICTION_COOLDOWN_S = 15 * 60
 # Horizonte de la estimación de ingreso que va a los navegadores (Modo cielo)
 # cuando el aviso anticipado por Telegram está apagado (predict_minutes = 0).
 ETA_DEFAULT_HORIZON_MIN = 10
+# Un mismo comportamiento raro de una aeronave no se vuelve a avisar hasta que
+# pase este tiempo sin que se repita (mientras sigue, no se insiste).
+BEHAVIOR_COOLDOWN_S = 30 * 60
+# Cuánto tiempo se marca la aeronave en el mapa después de la última señal.
+BEHAVIOR_BADGE_S = 5 * 60
+# Tras un incidente se sigue guardando el recorrido este tiempo (repetición en 3D)
+# y se escribe en la base cada tanto, no en cada ciclo.
+INCIDENT_FOLLOW_S = 10 * 60
+INCIDENT_SAVE_EVERY_S = 30
+# Si desaparecen de golpe más aeronaves que estas, es la fuente y no un transpondedor.
+MAX_SIMULTANEOUS_LOST = 2
 
 
 def backoff_delay(poll_interval_s, failures, retry_after=None):
@@ -49,13 +60,18 @@ async def load_config():
 
 class Monitor:
     def __init__(self, *, fetch=adsbfi.fetch_snapshot, load_config=load_config, notifier=None,
-                 publisher=broadcast, clock=time.monotonic):
+                 publisher=broadcast, clock=time.monotonic, recorder=None):
         self.fetch = fetch
         self.load_config = load_config
         self.notifier = notifier or TelegramNotifier(load_config)
         self.publisher = publisher
         self.clock = clock
+        self.recorder = recorder  # registro de incidentes (None: no se guarda nada)
         self.state = AircraftState()
+        self.tracks = behavior.Tracks()
+        self._flagged = {}  # (hex, tipo de comportamiento) -> hora de la última señal
+        self._open = {}  # id de incidente -> {"hex", "until", "saved_at"}: recorridos que se siguen guardando
+        self._now = None  # hora del servidor de adsb.fi en el último ciclo
         self.status = {"ok": None, "error": None, "last_update": None, "failures": 0}
         self._failures = 0
         self._excluded = frozenset()  # aeronaves que no generan alerta (claves de exclusions)
@@ -86,6 +102,8 @@ class Monitor:
             self._loop.call_soon_threadsafe(self._wake.set)
 
     async def run(self):
+        if self.recorder is not None:
+            await self.recorder.startup()
         async with adsbfi.make_client(settings.ADSBFI_USER_AGENT) as client:
             while True:
                 started = self.clock()
@@ -130,6 +148,7 @@ class Monitor:
         except adsbfi.AdsbFiError as exc:
             return await self._handle_failure(config, exc)
 
+        recovering = bool(self._failures)
         if self._failures:
             logger.info("adsb.fi responde nuevamente después de %d fallo(s).", self._failures)
         self._failures = 0
@@ -137,7 +156,14 @@ class Monitor:
         if snapshot.msg and snapshot.msg != "No error":
             logger.warning("adsb.fi informó: %s", snapshot.msg)
 
+        # Para "dejó de transmitir": quién estaba adentro antes de esta respuesta.
+        same_query = self.state.query_key == query
+        before = {h: self.state.aircraft[h] for h in self.state.inside if h in self.state.aircraft}
+
         result = self.state.update(snapshot, zone, query)
+        self._now = snapshot.now
+        for aircraft in self.state.aircraft.values():
+            self.tracks.record(aircraft)
         self._log_incomplete(result)
         self._set_status(ok=True, error=None, last_update=snapshot.now)
 
@@ -149,11 +175,16 @@ class Monitor:
             alert = build_alert(aircraft, zone)
             logger.info("ALERTA: %s ingresó a %s (alt %s ft, %s kt, rumbo %s°, %.1f NM).",
                         alert["label"], zone.name, alert["alt_ft"], alert["gs"], alert["track"], alert["dst"])
+            alert["incident_id"] = await self._open_incident(behavior.ENTRY, zone, alert, None, snapshot.now)
             self.notifier.enqueue(alert, zone)
             await self.publisher.send_alert(alert)
         for hex_code in result.exited:
             logger.info("%s salió de la zona.", hex_code)
         self._predict(getattr(config, "predict_minutes", 0), zone, snapshot.now)
+        lost = [before[h] for h in result.purged if h in before] if same_query and not recovering else []
+        await self._watch_behavior(getattr(config, "behavior_alerts", False), zone, lost, snapshot.now)
+        await self._follow_incidents(snapshot.now)
+        self.tracks.prune(snapshot.now, keep={info["hex"] for info in self._open.values()})
 
         await self.publisher.send_aircraft(self.aircraft_payload(), self.status)
         return config.poll_interval_s
@@ -175,6 +206,89 @@ class Monitor:
             logger.info("PREAVISO: %s entraría a %s en %.1f min.", alert["label"], zone.name, minutes)
             self.notifier.enqueue(alert, zone)
 
+    # --- comportamiento raro e incidentes ------------------------------------
+
+    async def _watch_behavior(self, enabled, zone, lost, now):
+        """Avisa (web y Telegram) de los comportamientos raros nuevos. Ver ``behavior``."""
+        self._flagged = {k: t for k, t in self._flagged.items() if now - t < BEHAVIOR_COOLDOWN_S}
+        if not enabled:
+            return
+        events = []
+        for hex_code, aircraft in self.state.aircraft.items():
+            if exclusions.is_excluded(aircraft, self._excluded):
+                continue
+            found = behavior.detect(aircraft, self.tracks.points.get(hex_code, ()),
+                                    self.tracks.rates.get(hex_code, ()), zone, now)
+            events.extend((kind, aircraft, detail) for kind, detail in found.items())
+        if len(lost) > MAX_SIMULTANEOUS_LOST:
+            logger.warning("%d aeronaves dejaron de verse a la vez dentro de la zona: parece un corte "
+                           "de la fuente de datos, no se avisa.", len(lost))
+            lost = []
+        for aircraft in lost:
+            if not exclusions.is_excluded(aircraft, self._excluded) and behavior.lost_while_flying(aircraft, self.tracks.get(aircraft.hex)):
+                events.append((behavior.SIGNAL_LOST, aircraft, {"last_seen": aircraft.timestamp}))
+
+        for kind, aircraft, detail in events:
+            key = (aircraft.hex, kind)
+            repeated = key in self._flagged
+            self._flagged[key] = now  # mientras siga pasando, no se vuelve a avisar
+            if repeated:
+                continue
+            alert = {
+                **build_alert(aircraft, zone),
+                "kind": kind,
+                "title": behavior.KIND_TITLES[kind],
+                "summary": behavior.summary(kind, detail, zone.name),
+                "detail": detail,
+                "time": now,
+            }
+            logger.info("COMPORTAMIENTO: %s — %s.", alert["label"], alert["summary"])
+            alert["incident_id"] = await self._open_incident(kind, zone, alert, detail, now)
+            self.notifier.enqueue(alert, zone)
+            await self.publisher.send_incident({**alert, "id": alert["incident_id"], "simulated": False})
+
+    async def _open_incident(self, kind, zone, alert, detail, now):
+        """Guarda el incidente con el recorrido hasta ahora. Devuelve su id (o None)."""
+        if self.recorder is None:
+            return None
+        saved = await self.recorder.open(kind, zone, occurred_at=now, alert=alert, detail=detail,
+                                         track=self.tracks.get(alert["hex"]))
+        if not saved:
+            return None
+        self._open[saved["id"]] = {"hex": alert["hex"], "until": now + INCIDENT_FOLLOW_S, "saved_at": now}
+        return saved["id"]
+
+    async def _follow_incidents(self, now):
+        """Completa el recorrido de los incidentes recientes (lo que pasó después)."""
+        for incident_id, info in list(self._open.items()):
+            done = now >= info["until"] or info["hex"] not in self.state.aircraft
+            if not done and now - info["saved_at"] < INCIDENT_SAVE_EVERY_S:
+                continue
+            info["saved_at"] = now
+            await self.recorder.update(incident_id, self.tracks.get(info["hex"]), done)
+            if done:
+                del self._open[incident_id]
+
+    def aircraft_now(self):
+        """Copia de las aeronaves actuales, segura desde una vista (otro hilo)."""
+        for _attempt in range(3):
+            try:
+                return list(self.state.aircraft.values())
+            except RuntimeError:  # el monitor justo estaba modificando el diccionario
+                continue
+        return []
+
+    def notify_from_thread(self, alert):
+        """Encola un aviso de Telegram desde una vista (otro hilo que el del monitor)."""
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self.notifier.enqueue, alert, None)
+
+    def behavior_of(self, hex_code):
+        """Comportamientos raros recientes de una aeronave (para marcarla en el mapa)."""
+        if self._now is None:
+            return []
+        return [kind for (h, kind), t in self._flagged.items() if h == hex_code and self._now - t < BEHAVIOR_BADGE_S]
+
     async def _handle_failure(self, config, exc):
         self._failures += 1
         delay = backoff_delay(config.poll_interval_s, self._failures, getattr(exc, "retry_after", None))
@@ -193,7 +307,8 @@ class Monitor:
 
         ``eta_min``: minutos estimados hasta entrar a la zona (la misma cuenta del
         aviso anticipado), o None si ya está adentro, se aleja o tarda más que el
-        horizonte. Lo usa el Modo cielo.
+        horizonte. Lo usa el Modo cielo. ``behavior``: comportamientos raros
+        recientes (ver ``behavior``).
         """
         payload = self.state.payload(self._excluded)
         for item in payload:
@@ -202,6 +317,7 @@ class Monitor:
             if self._zone is not None and aircraft is not None and not item["inside"]:
                 eta = self._zone.minutes_to_entry(aircraft, self._eta_horizon_min)
             item["eta_min"] = round(eta, 1) if eta is not None else None
+            item["behavior"] = self.behavior_of(item["hex"])
         return payload
 
     def _log_incomplete(self, result):
@@ -223,7 +339,13 @@ class Monitor:
 
 
 # Instancia única del proceso: la usan el consumer de WebSocket y la API.
-monitor = Monitor()
+def _db_recorder():
+    from .records import DbRecorder  # acá y no arriba: necesita los modelos ya cargados
+
+    return DbRecorder()
+
+
+monitor = Monitor(recorder=_db_recorder())
 
 
 def start_with_daphne():

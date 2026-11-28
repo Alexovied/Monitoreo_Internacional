@@ -20,6 +20,18 @@ const router = createRouter({
       meta: { title: 'Modo cielo', fullscreen: true },
     },
     {
+      path: '/registro',
+      name: 'registry',
+      component: () => import('./views/RegistryView.vue'),
+      meta: { title: 'Registro', members: true },
+    },
+    {
+      path: '/registro/:id(\\d+)',
+      name: 'replay',
+      component: () => import('./views/ReplayView.vue'),
+      meta: { title: 'Repetición', members: true },
+    },
+    {
       path: '/usuarios',
       name: 'users',
       component: () => import('./views/UsersView.vue'),
@@ -48,6 +60,8 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: to.fullPath !== '/' ? { next: to.fullPath } : {} }
   }
   if (to.meta.admin && !session.user.is_admin) return { name: 'map' }
+  // El registro es de la API con sesión de usuario: un visitante no lo puede leer.
+  if (to.meta.members && session.user.is_guest) return { name: 'map' }
   return true
 })
 

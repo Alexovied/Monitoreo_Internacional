@@ -74,22 +74,27 @@ async function onLogout() {
       </button>
 
       <div id="main-menu" class="collapse navbar-collapse" :class="{ show: menuOpen }">
-        <ul class="navbar-nav me-auto gap-1 mt-2 mt-lg-0">
+        <ul class="navbar-nav me-auto gap-1 mt-2 mt-lg-0 text-nowrap">
           <li class="nav-item">
-            <RouterLink class="nav-link px-3 rounded" to="/"><i class="bi bi-map me-1"></i> Mapa</RouterLink>
+            <RouterLink class="nav-link px-2 rounded" to="/"><i class="bi bi-map me-1 d-lg-none d-xxl-inline"></i> Mapa</RouterLink>
           </li>
           <li class="nav-item">
-            <RouterLink class="nav-link px-3 rounded" to="/cielo"><i class="bi bi-binoculars me-1"></i> Modo cielo</RouterLink>
+            <RouterLink class="nav-link px-2 rounded" to="/cielo"><i class="bi bi-binoculars me-1 d-lg-none d-xxl-inline"></i> Modo cielo</RouterLink>
+          </li>
+          <li v-if="!session.user.is_guest" class="nav-item">
+            <RouterLink class="nav-link px-2 rounded" :class="{ active: $route.name === 'replay' }" to="/registro">
+              <i class="bi bi-journal-text me-1 d-lg-none d-xxl-inline"></i> Registro
+            </RouterLink>
           </li>
           <template v-if="session.user.is_admin">
             <li class="nav-item">
-              <RouterLink class="nav-link px-3 rounded" to="/usuarios"><i class="bi bi-people me-1"></i> Usuarios</RouterLink>
+              <RouterLink class="nav-link px-2 rounded" to="/usuarios"><i class="bi bi-people me-1 d-lg-none d-xxl-inline"></i> Usuarios</RouterLink>
             </li>
             <li class="nav-item">
-              <RouterLink class="nav-link px-3 rounded" to="/configuracion"><i class="bi bi-gear me-1"></i> Configuración</RouterLink>
+              <RouterLink class="nav-link px-2 rounded" to="/configuracion"><i class="bi bi-gear me-1 d-lg-none d-xxl-inline"></i> Configuración</RouterLink>
             </li>
             <li class="nav-item">
-              <RouterLink class="nav-link px-3 rounded" to="/sistema"><i class="bi bi-cpu me-1"></i> Sistema</RouterLink>
+              <RouterLink class="nav-link px-2 rounded" to="/sistema"><i class="bi bi-cpu me-1 d-lg-none d-xxl-inline"></i> Sistema</RouterLink>
             </li>
           </template>
         </ul>
@@ -111,7 +116,7 @@ async function onLogout() {
           >
             <i class="bi bi-exclamation-triangle-fill me-1"></i> adsb.fi sin respuesta
           </span>
-          <span v-else-if="live.connected && live.status?.last_update" class="small text-white-50">
+          <span v-else-if="live.connected && live.status?.last_update" class="small text-white-50 d-lg-none d-xxl-inline">
             <i class="bi bi-clock me-1"></i>Actualizado {{ clock(live.status.last_update) }}
           </span>
           <button

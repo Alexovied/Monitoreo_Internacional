@@ -33,6 +33,7 @@ def build_alert(aircraft, zone):
         "flight": aircraft.flight,
         "registration": aircraft.registration,
         "type": aircraft.type,
+        "category": aircraft.category,
         "alt_ft": alt_ft,
         "alt_m": feet_to_meters(alt_ft) if alt_ft is not None else None,
         "gs": aircraft.gs,
@@ -137,7 +138,10 @@ def format_alert_message(alert):
     if ours:
         links.insert(0, f'<a href="{escape(ours, quote=True)}">Ver en nuestro mapa</a>')
 
-    if alert.get("eta_min") is not None:
+    if alert.get("kind"):
+        # Comportamiento raro (ver ``behavior``): no es un ingreso a la zona.
+        header = f"<b>{escape(str(alert['title']).upper())}</b>\n<i>{escape(str(alert['summary']))}</i>"
+    elif alert.get("eta_min") is not None:
         # Distinto desde la primera palabra: es lo que muestra la vista previa de Telegram.
         header = ("<b>PREAVISO: TODAVÍA NO ENTRÓ</b>\n"
                   f"<i>Podría entrar en ~{max(1, round(alert['eta_min']))} min si mantiene rumbo y velocidad</i>")
